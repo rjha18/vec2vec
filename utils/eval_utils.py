@@ -1,0 +1,183 @@
+import nltk
+import evaluate
+
+import torch
+import torch.nn.functional as F
+import numpy as np
+
+from utils.streaming_utils import process_batch
+
+
+def generate_text(inverter, embeddings, max_seq_length=32):
+    gen_kwargs = {
+        "early_stopping": False,
+        "num_beams": 1,
+        "do_sample": False,
+        "no_repeat_ngram_size": 0,
+        'min_length': 1,
+        'max_length': max_seq_length,
+    }
+    regenerated = inverter.generate(
+        inputs={
+            "frozen_embeddings": embeddings,
+        },
+        generation_kwargs=gen_kwargs,
+    )
+
+    output_strings = inverter.tokenizer.batch_decode(
+        regenerated, skip_special_tokens=True
+    )
+    return output_strings
+
+
+def _calculate_token_f1(predictions, references):
+    true_words = set(nltk.tokenize.word_tokenize(references))
+    pred_words = set(nltk.tokenize.word_tokenize(predictions))
+
+    TP = len(true_words & pred_words)
+    FP = len(true_words) - len(true_words & pred_words)
+    FN = len(pred_words) - len(true_words & pred_words)
+
+    precision = (TP) / (TP + FP + 1e-20)
+    recall = (TP) / (TP + FN + 1e-20)
+
+    try:
+        f1 = (2 * precision * recall) / (precision + recall + 1e-20)
+    except ZeroDivisionError:
+        f1 = 0.0
+    return f1
+
+
+def calculate_scores(score_flag, target_text, translation_text):
+    if score_flag == 'bleu':
+        bleu = evaluate.load("sacrebleu")
+        score_func = lambda p, r: bleu.compute(predictions=[p], references=[r])['score']
+    elif score_flag == 'f1':
+        score_func = _calculate_token_f1
+    else:
+        raise ValueError(f"Unknown score_flag: {score_flag}")
+
+    return np.mean([score_func(p, r) for p, r in zip(target_text, translation_text)])
+
+
+def eval_batch(ins, recons, translations):
+    recon_res = {}
+    translation_res = {}
+    for target_flag, emb in ins.items():
+        rec = recons[target_flag]
+        recon_res[target_flag] = {
+            "mse": F.mse_loss(emb, rec).item(),
+            "cos": F.cosine_similarity(emb, rec).mean().item(),
+            "std": rec.std(dim=0).mean().item(),
+        }
+        translation_res[target_flag] = {}
+        for flag, trans in translations[target_flag].items():
+            translation_res[target_flag][flag] = {
+                "mse": F.mse_loss(emb, trans).item(),
+                "cos": F.cosine_similarity(emb, trans).mean().item(),
+                "std": trans.std(dim=0).mean().item(),
+            }
+
+    return recon_res, translation_res
+
+
+def merge_dicts(full, incremental):
+    def recursive_merge(f, i):
+        for key, val in i.items():
+            if isinstance(val, dict):
+                if key not in f or not isinstance(f[key], dict):
+                    f[key] = {}
+                recursive_merge(f[key], val)
+            else:
+                if key not in f:
+                    f[key] = []
+                f[key].append(val)
+    
+    recursive_merge(full, incremental)
+
+
+def mean_dicts(full):
+    def recursive_mean(f):
+        for key, val in f.items():
+            if isinstance(val, dict):
+                recursive_mean(val)
+            else:
+                f[key] = np.mean(val)
+    
+    recursive_mean(full)
+
+
+def eval_loop_(
+    cfg, translator, encoders, iter, pbar=None, device='cpu'
+):
+    recon_res = {}
+    translation_res = {}
+
+    with torch.no_grad():
+        n = 0
+        for _, batch in enumerate(iter):
+            ins = process_batch(cfg, batch, encoders, device)
+            n += cfg.val_bs
+            recons, translations = translator(ins, 0.0, False)
+            
+            r_res, t_res = eval_batch(ins, recons, translations)
+            merge_dicts(recon_res, r_res)
+            merge_dicts(translation_res, t_res)
+            if pbar is not None:
+                pbar.update(1)
+        mean_dicts(recon_res)
+        mean_dicts(translation_res)
+        return recon_res, translation_res
+
+
+# TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.
+# def text_loop_(
+#     cfg, translator, encoders, inverters, iter, pbar=None, device='cpu'
+# ):
+#     # Losses
+#     bleus = {k: {r: 0 for r in encoders.keys()} for k in cfg.text_embs}
+#     f1s = {k: {r: 0 for r in encoders.keys()} for k in cfg.text_embs}
+
+#     # Calculate BLEU
+#     total = 0
+#     with torch.no_grad():
+#         for batch in iter:
+#             ins = process_batch(cfg, batch, encoders, device)
+
+#             target_texts = {}
+#             translations = {}
+#             for target_flag in cfg.text_embs:
+#                 target_texts[target_flag] = generate_text(inverters[target_flag], ins[target_flag], 32)
+#                 translations[target_flag] = {}
+#                 for flag, emb in ins.items():
+#                     trans = translator.translate_embeddings(emb, flag, target_flag)
+#                     translations[target_flag][flag] = generate_text(inverters[target_flag], trans, 32)
+
+#             for t_flag, t_text in target_texts.items():
+#                 for tr_flag, tr_text in translations[t_flag].items():
+#                     bleus[t_flag][tr_flag] = calculate_scores('bleu', t_text, tr_text) * cfg.val_bs + bleus[t_flag][tr_flag]
+#                     f1s[t_flag][tr_flag] = calculate_scores('f1', t_text, tr_text) * cfg.val_bs + f1s[t_flag][tr_flag]
+
+#             total += cfg.val_bs
+#             if pbar is not None:
+#                 pbar.update(1)
+
+#         return {k: {r: v / total for r, v in bleus[k].items()} for k in bleus}, {k: {r: v / total for r, v in f1s[k].items()} for k in f1s}
+
+
+class EarlyStopper:
+    def __init__(self, patience=1, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.max_val_cos = 0
+
+    def early_stop(self, val_cos):
+        if val_cos > (self.max_val_cos + self.min_delta):
+            self.max_val_cos = val_cos
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False

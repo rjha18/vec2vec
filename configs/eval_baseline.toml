@@ -1,0 +1,9 @@
+[eval]
+dataset = "NanoNQ"
+max_seq_length = 512
+batch_size = 64
+use_good_queries = true
+run_baseline = true
+embs = [ "gte", "gtr", "stella", "sentence-t5", "e5", "snowflake", "ember", "sbert", "gist", "clip", "bert-nli",]
+bs = 256
+train_path = '/share/shmatikov/rishi/edx/sbert_ember/baselines/{}/'

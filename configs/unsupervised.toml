@@ -1,0 +1,54 @@
+[general]
+use_wandb = 1
+seed = 0
+style = 'unet'
+d_adapter = 1024
+normalize_embeddings = true
+depth = 3
+# embs = [ "gte", "gtr", "stella", "sentence-t5", "e5", "snowflake", "ember", "sbert", "gist", "clip", "bert-nli",]
+lm_base_name = "google-bert/bert-base-uncased"
+upscale_num = 16
+n_embs_per_batch = 1
+max_seq_length = 512
+mixed_precision = 'bf16'
+val_size = 256
+
+[train]
+unsup_emb = 'gte'
+sup_emb = 'gtr'
+lr = 1e-4
+bs = 256
+save_every = 6_000
+epochs = 10
+val_bs = 256
+dataset = "nq"
+max_grad_norm = 10.0
+gradient_accumulation_steps = 2
+loss_coefficient_rec = 1
+loss_coefficient_vsp = 0
+loss_coefficient_cc = 1
+loss_coefficient_adv = 1
+loss_coefficient_disc = 1
+add_noise = 0
+add_noise_rotation = 0
+force_dump = true
+overwrite = false
+freeze_params = false
+patience = 25
+delta = 0.0
+use_target_vectors = false
+use_small_output_adapters = false
+
+[logging]
+wandb_project = 'unsupervised_disc'
+wandb_name = 'unsupervised'
+load_dir = '/share/shmatikov/rishi/edx/edx-v1/model.pt'
+save_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/{}/'
+
+
+[discriminator]
+smooth = 0.9
+disc_dim = 1024
+disc_depth = 1
+disc_lr = 5e-4
+eps = 6.25e-10

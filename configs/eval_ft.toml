@@ -1,0 +1,6 @@
+[eval]
+dataset = "NQ"
+max_seq_length = 512
+batch_size = 64
+use_good_queries = true
+train_path = '/share/shmatikov/rishi/edx/sbert_ember/finetuning/{}/'

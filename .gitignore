@@ -1,0 +1,13 @@
+__pycache__/
+tmp_trainer
+legacy
+*.pyc
+checkpoints*
+slurm
+out
+wandb/
+**results**/
+embeddings/
+log_submitit/
+model_weights/
+datasets/

@@ -1,0 +1,45 @@
+[general]
+use_wandb = 1
+seed = 0
+style = 'unet'
+val_size = 4800
+normalize_embeddings = true
+depth = 3
+embs = ['gte', 'gtr', 'stella', 'sentence-t5', 'e5', 'snowflake', 'ember', 'sbert', 'gist', 'clip', 'bert-nli']
+lm_base_name = "google-bert/bert-base-uncased"
+upscale_num = 16
+n_embs_per_batch = 2
+max_seq_length = 512
+
+[train]
+lr = 1e-4
+bs = 64
+save_every = 600
+epochs = 3
+val_bs = 64
+dataset = "fineweb-medium"
+max_grad_norm = 10.0
+gradient_accumulation_steps = 1
+loss_coefficent_rec = 1
+loss_coefficient_trans = 1
+loss_coefficient_vsp = 1
+loss_coefficient_cc = 1
+add_noise = 0
+add_noise_rotation = 0
+
+[logging]
+wandb_project = 'edx-1'
+wandb_name = 'unet-pretrain'
+save_dir = 'checkpoints-unet/{}/'
+
+[huggingface]
+hf_username = 'jack-morris'
+model_name = 'unet-pretrain'
+
+[eval]
+dataset = "fineweb-medium"
+val_folder = 'results/'
+val_size = 10000
+inversion_size = 1000
+val_bs = 64
+text_embs = ['gtr']

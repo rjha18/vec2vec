@@ -1,0 +1,42 @@
+[general]
+use_wandb = 1
+seed = 0
+d_adapter = 1024
+val_size = 1024
+normalize_embeddings = true
+depth = 3
+embs = ['sbert', 'ember']
+lm_base_name = "google-bert/bert-base-uncased"
+upscale_num = 16
+n_embs_per_batch = 2
+max_seq_length = 512
+mixed_precision = "bf16"
+epochs = 100
+patience = 5
+
+[train]
+src_emb = 'sbert'
+tgt_emb = 'ember'
+lr = 1e-4
+bs = 256
+save_every = 6_000
+epochs = 50
+val_bs = 64
+dataset = "nq"
+max_grad_norm = 10.0
+gradient_accumulation_steps = 2
+loss_coefficent_rec = 0
+loss_coefficient_trans = 1
+loss_coefficient_vsp = 0
+loss_coefficient_cc = 0
+add_noise = 0
+add_noise_rotation = 0
+force_dump = true
+overwrite = true
+use_target_vectors = false
+
+[logging]
+wandb_project = 'o2o_baselines'
+wandb_name = 'o2o'
+save_dir = '/share/shmatikov/rishi/edx/sbert_ember/baselines/{}/'
+# save_dir = '/opt/hpcaas/.mounts/fs-0565f60d669b6a2d3/home/jxm/supervised_translation/checkpoints-test/{}/'
