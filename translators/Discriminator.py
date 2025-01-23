@@ -9,9 +9,9 @@ class Discriminator(nn.Module):
 
         layers = []
         for _ in range(depth):
-            layers.append(nn.ReLU())
+            layers.append(nn.Tanh())
             layers.append(nn.Linear(discriminator_dim, discriminator_dim))
-        layers.append(nn.ReLU())
+        layers.append(nn.Tanh())
         self.disc_layers = nn.Sequential(*layers)
 
         self.output = nn.Linear(discriminator_dim, 1)

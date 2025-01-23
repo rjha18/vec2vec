@@ -4,7 +4,7 @@ seed = 0
 style = 'unet'
 d_adapter = 1024
 normalize_embeddings = true
-depth = 3
+depth = 5
 # embs = [ "gte", "gtr", "stella", "sentence-t5", "e5", "snowflake", "ember", "sbert", "gist", "clip", "bert-nli",]
 lm_base_name = "google-bert/bert-base-uncased"
 upscale_num = 16
@@ -49,6 +49,6 @@ save_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/{}/'
 [discriminator]
 smooth = 0.9
 disc_dim = 1024
-disc_depth = 1
+disc_depth = 5
 disc_lr = 5e-4
 eps = 6.25e-10

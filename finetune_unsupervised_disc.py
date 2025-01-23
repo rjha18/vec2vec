@@ -77,10 +77,15 @@ def training_loop_(
                 disc_ce_B = F.binary_cross_entropy_with_logits(d_us, torch.ones((cfg.bs, 1), device=device) * cfg.smooth)
                 disc_loss = disc_ce_A + disc_ce_B
                 disc_loss *= cfg.loss_coefficient_disc
+                # disc accuracy on sigmoid of d_ss and d_us
+                disc_acc_A = (torch.sigmoid(d_ss) < 0.5).sum().item() / cfg.bs
+                disc_acc_B = (torch.sigmoid(d_us) > 0.5).sum().item() / cfg.bs
+
                 translator.train()
                 disc_opt.zero_grad()
                 accelerator.backward(disc_loss)
                 accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
+                disc_opt.step()
             else:
                 disc_loss = torch.tensor(0.0)
 
@@ -148,6 +153,8 @@ def training_loop_(
                 "loss": loss.item(),
                 "grad_norm": grad_norm.item(),
                 "learning_rate": opt.param_groups[0]["lr"],
+                "disc_acc_A": disc_acc_A,
+                "disc_acc_B": disc_acc_B,
             }
 
             for metric, value in metrics.items():
