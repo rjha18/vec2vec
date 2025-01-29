@@ -2,9 +2,10 @@
 use_wandb = 1
 seed = 0
 style = 'unet'
-d_adapter = 1024
+d_adapter = 512
+d_hidden = 1024
 normalize_embeddings = true
-depth = 5
+depth = 3
 # embs = [ "gte", "gtr", "stella", "sentence-t5", "e5", "snowflake", "ember", "sbert", "gist", "clip", "bert-nli",]
 lm_base_name = "google-bert/bert-base-uncased"
 upscale_num = 16
@@ -16,19 +17,19 @@ val_size = 256
 [train]
 unsup_emb = 'gte'
 sup_emb = 'gtr'
-lr = 1e-4
-bs = 256
+lr = 1e-5
+bs = 512
 save_every = 6_000
 epochs = 10
 val_bs = 256
 dataset = "nq"
 max_grad_norm = 10.0
 gradient_accumulation_steps = 2
-loss_coefficient_rec = 1
-loss_coefficient_vsp = 0
+loss_coefficient_rec = 0.01
+loss_coefficient_vsp = 1.5
 loss_coefficient_cc = 1
-loss_coefficient_adv = 1
-loss_coefficient_disc = 1
+loss_coefficient_adv = 0.1
+loss_coefficient_disc = 0.1
 add_noise = 0
 add_noise_rotation = 0
 force_dump = true
@@ -38,6 +39,9 @@ patience = 25
 delta = 0.0
 use_target_vectors = false
 use_small_output_adapters = false
+use_residual_adapters = true
+no_scheduler = true
+heatmap_size = 16
 
 [logging]
 wandb_project = 'unsupervised_disc'
@@ -47,8 +51,9 @@ save_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/{}/'
 
 
 [discriminator]
-smooth = 0.9
+smooth = 0.8
 disc_dim = 1024
-disc_depth = 5
-disc_lr = 5e-4
+disc_depth = 3
+disc_lr = 5e-5
 eps = 6.25e-10
+use_residual = true

@@ -1,6 +1,7 @@
 import torch
 import random
 from torch import nn
+from translators.MLPWithResidual import MLPWithResidual
 from translators.AbsNTranslator import AbsNTranslator
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -11,17 +12,21 @@ class TransformTranslator(AbsNTranslator):
         self,
         encoder_dims: dict[str, int],
         d_adapter: int,
+        d_hidden: int,
         transform: nn.Module,
         depth: int = 3,
         normalize_embeddings: bool = True,
         style: str = 'unet',
         use_target_vectors: bool = True,
         use_small_output_adapters: bool = False,
+        use_residual_adapters: bool = False,
     ):
         super().__init__(encoder_dims, d_adapter, depth)
 
+        self.d_hidden = d_hidden
         self.target_vectors = nn.ParameterDict()
         self.use_small_output_adapters = use_small_output_adapters
+        self.use_residual_adapters = use_residual_adapters
         for flag, dims in encoder_dims.items():
             in_adapter, out_adapter = self._make_adapters(dims)
             self.in_adapters[flag] = in_adapter
@@ -59,6 +64,9 @@ class TransformTranslator(AbsNTranslator):
 
     def _make_adapters(self, dims):
         assert dims is not None
+        if self.use_residual_adapters:
+            print("NOTE: Using residual adapters!")
+            return MLPWithResidual(self.depth, dims, self.d_hidden, self.d_adapter), MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims)
         in_adapter = []
         out_adapter = []
         for _ in range(self.depth):

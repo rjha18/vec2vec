@@ -26,6 +26,9 @@ from utils.train_utils import rec_loss_fn, trans_loss_fn, uni_loss_fn, vsp_loss_
 from utils.streaming_utils import load_streaming_embeddings, process_batch
 from utils.wandb_logger import Logger
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 def training_loop_(
     save_dir, accelerator, translator, disc, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, disc_opt, logger=None, max_num_batches=None
@@ -69,8 +72,9 @@ def training_loop_(
                     accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
                 )
 
-                sup_to_sup = recons[cfg.sup_emb]
-                unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb]
+                # sup_to_sup = recons[cfg.sup_emb]
+                sup_to_sup = ins[cfg.sup_emb]
+                unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb].detach()
                 d_ss, d_us = disc(sup_to_sup), disc(unsup_to_sup)
 
                 disc_ce_A = F.binary_cross_entropy_with_logits(d_ss, torch.zeros((cfg.bs, 1), device=device))
@@ -92,28 +96,25 @@ def training_loop_(
             recons, translations = (
                 accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
             )
-
+    
             if cfg.loss_coefficient_adv > 0:
                 disc.eval()
-                sup_to_sup = recons[cfg.sup_emb]
+                # sup_to_sup = recons[cfg.sup_emb]
+                # sup_to_sup = ins[cfg.sup_emb]
                 unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb]
-                d_ss, d_us = disc(sup_to_sup), disc(unsup_to_sup)
+                # d_ss, d_us = disc(sup_to_sup), disc(unsup_to_sup)
+                d_us = disc(unsup_to_sup)
 
-                adv_loss_A = F.binary_cross_entropy_with_logits(d_ss, torch.ones((cfg.bs, 1), device=device))
-                adv_loss_B = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device) * cfg.smooth)
-                adv_loss = adv_loss_A + adv_loss_B
+                # adv_loss_A = F.binary_cross_entropy_with_logits(d_ss, torch.ones((cfg.bs, 1), device=device))
+                # adv_loss_B = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device) * cfg.smooth)
+                adv_loss = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device))
+                # adv_loss = adv_loss_A + adv_loss_B
                 disc.train()
             else:
                 adv_loss = torch.tensor(0.0)
 
             rec_loss = rec_loss_fn(ins, recons, logger)
 
-            if cfg.loss_coefficient_vsp > 0:
-                vsp_loss = vsp_loss_fn(ins, translations, logger)
-            else:
-                vsp_loss = torch.tensor(0.0)
-
-            # TODO fix cc
             if cfg.loss_coefficient_cc > 0:
                 cc_keys = list(translations.keys())
                 random.shuffle(cc_keys)
@@ -127,6 +128,11 @@ def training_loop_(
             else:
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
+            
+            if cfg.loss_coefficient_vsp > 0:
+                vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
+            else:
+                vsp_loss = torch.tensor(0.0)
 
             loss = (
                   (rec_loss * cfg.loss_coefficient_rec)
@@ -141,7 +147,8 @@ def training_loop_(
             grad_norm = get_grad_norm(translator)
 
             opt.step()
-            scheduler.step()
+            if not hasattr(cfg, 'no_scheduler') or not cfg.no_scheduler:
+                scheduler.step()
 
             metrics = {
                 "disc_loss": disc_loss.item(),
@@ -314,13 +321,12 @@ def main():
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
     scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
 
-    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth)
+    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
 
     translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt = accelerator.prepare(
         translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt
     )
-
 
     best_model = None
     early_stopper = EarlyStopper(
@@ -329,12 +335,12 @@ def main():
     )
 
     for epoch in range(max_num_epochs):
-        stop_cond = []
         if use_val_set and get_rank() == 0:
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
-                recons, trans = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
+                eval_res = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
+                recons, trans = eval_res[0], eval_res[1]
                 for flag, res in recons.items():
                     for k, v in res.items():
                         if k == 'cos':
@@ -342,25 +348,21 @@ def main():
                 for target_flag, d in trans.items():
                     for flag, res in d.items():
                         for k, v in res.items():
-                            if k == 'cos':
-                                if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
-                                    continue
-                                elif flag == cfg.unsup_emb:
-                                    stop_cond.append(v)
-                                    val_res[f"val_from/{flag}_{target_flag}_{k}"] = v
-                                elif target_flag == cfg.unsup_emb:
-                                    val_res[f"val_to/{flag}_{target_flag}_{k}"] = v
-                                else:
-                                    val_res[f"val_{flag}_{target_flag}_{k}"] = v
-
-                val_res['stop_cond'] = sum(stop_cond) / len(stop_cond)
+                            if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
+                                continue
+                            val_res[f"val/{flag}_{target_flag}_{k}"] = v
+                sims = eval_res[2] if len(eval_res) > 2 else None
+                if sims is not None:
+                    plt.figure(figsize=(36,30))
+                    sns.heatmap(sims, vmin=0, vmax=1).set(title='Heatmap of cosine similarities')
+                    val_res['val_heatmap'] = wandb.Image(plt)
                 wandb.log(val_res)
 
-                if early_stopper.early_stop(val_res['stop_cond']):
-                    print("Stopping early! Saving previous model...")
-                    break
-                else:
-                    best_model = accelerator.unwrap_model(translator).state_dict().copy()
+                # if early_stopper.early_stop(val_res['stop_cond']):
+                #     print("Stopping early! Saving previous model...")
+                #     break
+                # else:
+                #     best_model = accelerator.unwrap_model(translator).state_dict().copy()
 
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)

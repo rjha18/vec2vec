@@ -4,6 +4,7 @@ import evaluate
 import torch
 import torch.nn.functional as F
 import numpy as np
+from sklearn.metrics.pairwise import cosine_distances
 
 from utils.streaming_utils import process_batch
 
@@ -64,20 +65,24 @@ def eval_batch(ins, recons, translations):
     recon_res = {}
     translation_res = {}
     for target_flag, emb in ins.items():
+        in_distances = 1 - (emb @ emb.T)
         rec = recons[target_flag]
+        rec_distances = 1 - (rec @ rec.T)
         recon_res[target_flag] = {
             "mse": F.mse_loss(emb, rec).item(),
             "cos": F.cosine_similarity(emb, rec).mean().item(),
             "std": rec.std(dim=0).mean().item(),
+            "vsp": (in_distances - rec_distances).abs().mean().item()
         }
         translation_res[target_flag] = {}
         for flag, trans in translations[target_flag].items():
+            out_distances = 1 - (trans @ trans.T)
             translation_res[target_flag][flag] = {
                 "mse": F.mse_loss(emb, trans).item(),
                 "cos": F.cosine_similarity(emb, trans).mean().item(),
                 "std": trans.std(dim=0).mean().item(),
+                "vsp": (in_distances - out_distances).abs().mean().item()
             }
-
     return recon_res, translation_res
 
 
@@ -113,22 +118,31 @@ def eval_loop_(
     recon_res = {}
     translation_res = {}
 
+    make_heatmap = cfg.heatmap_size > 0 if hasattr(cfg, 'heatmap_size') else False
+    sims = None
     with torch.no_grad():
         n = 0
         for _, batch in enumerate(iter):
-            ins = process_batch(cfg, batch, encoders, device)
+            ins = process_batch(cfg, batch, encoders, device)                
             n += cfg.val_bs
             recons, translations = translator(ins, 0.0, False)
             
             r_res, t_res = eval_batch(ins, recons, translations)
             merge_dicts(recon_res, r_res)
             merge_dicts(translation_res, t_res)
+            if make_heatmap:
+                assert hasattr(cfg, 'sup_emb') and hasattr(cfg, 'unsup_emb')
+                ins = {k: v[:cfg.heatmap_size] for k, v in ins.items()}
+                trans = translator.translate_embeddings(ins[cfg.unsup_emb], cfg.unsup_emb, cfg.sup_emb)
+                sims = 1 - cosine_distances(ins[cfg.sup_emb].cpu(), trans.cpu())
+                make_heatmap = False
             if pbar is not None:
                 pbar.update(1)
         mean_dicts(recon_res)
         mean_dicts(translation_res)
+        if sims is not None:
+            return recon_res, translation_res, sims
         return recon_res, translation_res
-
 
 # TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.
 # def text_loop_(

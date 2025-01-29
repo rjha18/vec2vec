@@ -32,6 +32,24 @@ def load_n_translator(cfg, encoder_dims):
 
     if cfg.style == 'n_simple':
         transform = nn.Linear(cfg.d_adapter, cfg.d_adapter)
+    elif cfg.style == 'n_double':
+        transform = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(cfg.d_adapter, cfg.d_adapter),
+            nn.SiLU(),
+            nn.Linear(cfg.d_adapter, cfg.d_adapter),
+            nn.SiLU(),
+        )
+    elif cfg.style == 'n_double_shared':
+        transform = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(cfg.d_adapter, cfg.d_adapter),
+            nn.SiLU(),
+            nn.Linear(cfg.d_adapter, cfg.d_adapter),
+            nn.SiLU(),
+        )
+        transform[1].weight = transform[3].weight
+        transform[1].bias = transform[3].bias
     elif cfg.style == 'n_ae':
         transform = nn.Sequential(
             nn.Linear(cfg.d_adapter, cfg.latent_dims),
@@ -50,11 +68,13 @@ def load_n_translator(cfg, encoder_dims):
     return TransformTranslator(
         encoder_dims=encoder_dims,
         d_adapter=cfg.d_adapter,
+        d_hidden=cfg.d_hidden,
         transform=transform,
         depth=cfg.depth,
         style=cfg.style,
         use_target_vectors=cfg.use_target_vectors,
         use_small_output_adapters=cfg.use_small_output_adapters if hasattr(cfg, 'use_small_output_adapters') else False,
+        use_residual_adapters=cfg.use_residual_adapters if hasattr(cfg, 'use_residual_adapters') else False,
     )
 
 
