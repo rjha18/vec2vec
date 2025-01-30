@@ -32,7 +32,8 @@ def trans_loss_fn(ins, translations, logger, prefix=""):
             loss = mse_loss
         else:
             loss += mse_loss
-            logger.logkv(f"{prefix}{flag}_{target_flag}_cos", F.cosine_similarity(emb, trans, dim=1).mean())
+
+        logger.logkv(f"{prefix}{flag}_{target_flag}_cos", F.cosine_similarity(emb, trans, dim=1).mean())
     return (loss / len(ins))
 
 

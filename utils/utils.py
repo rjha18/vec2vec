@@ -40,16 +40,6 @@ def load_n_translator(cfg, encoder_dims):
             nn.Linear(cfg.d_adapter, cfg.d_adapter),
             nn.SiLU(),
         )
-    elif cfg.style == 'n_double_shared':
-        transform = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(cfg.d_adapter, cfg.d_adapter),
-            nn.SiLU(),
-            nn.Linear(cfg.d_adapter, cfg.d_adapter),
-            nn.SiLU(),
-        )
-        transform[1].weight = transform[3].weight
-        transform[1].bias = transform[3].bias
     elif cfg.style == 'n_ae':
         transform = nn.Sequential(
             nn.Linear(cfg.d_adapter, cfg.latent_dims),

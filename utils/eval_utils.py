@@ -135,13 +135,14 @@ def eval_loop_(
                 ins = {k: v[:cfg.heatmap_size] for k, v in ins.items()}
                 trans = translator.translate_embeddings(ins[cfg.unsup_emb], cfg.unsup_emb, cfg.sup_emb)
                 sims = 1 - cosine_distances(ins[cfg.sup_emb].cpu(), trans.cpu())
+                top1_acc = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
                 make_heatmap = False
             if pbar is not None:
                 pbar.update(1)
         mean_dicts(recon_res)
         mean_dicts(translation_res)
         if sims is not None:
-            return recon_res, translation_res, sims
+            return recon_res, translation_res, sims, top1_acc
         return recon_res, translation_res
 
 # TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.

@@ -77,7 +77,7 @@ def training_loop_(
                 unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb].detach()
                 d_ss, d_us = disc(sup_to_sup), disc(unsup_to_sup)
 
-                disc_ce_A = F.binary_cross_entropy_with_logits(d_ss, torch.zeros((cfg.bs, 1), device=device))
+                disc_ce_A = F.binary_cross_entropy_with_logits(d_ss, torch.zeros((cfg.bs, 1), device=device) * (1 - cfg.smooth))
                 disc_ce_B = F.binary_cross_entropy_with_logits(d_us, torch.ones((cfg.bs, 1), device=device) * cfg.smooth)
                 disc_loss = disc_ce_A + disc_ce_B
                 disc_loss *= cfg.loss_coefficient_disc
@@ -108,6 +108,7 @@ def training_loop_(
                 # adv_loss_A = F.binary_cross_entropy_with_logits(d_ss, torch.ones((cfg.bs, 1), device=device))
                 # adv_loss_B = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device) * cfg.smooth)
                 adv_loss = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device))
+                #TODO accuracy here!
                 # adv_loss = adv_loss_A + adv_loss_B
                 disc.train()
             else:
@@ -130,7 +131,9 @@ def training_loop_(
                 cc_trans_loss = torch.tensor(0.0)
             
             if cfg.loss_coefficient_vsp > 0:
-                vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
+                # vsp_ins = {cfg.sup_emb: ins[cfg.sup_emb]}
+                vsp_ins = ins
+                vsp_loss = vsp_loss_fn(vsp_ins, cc_translations, logger)
             else:
                 vsp_loss = torch.tensor(0.0)
 
@@ -192,6 +195,7 @@ def main():
     assert hasattr(cfg, 'unsup_emb')
 
     accelerator = accelerate.Accelerator(
+        mixed_precision=cfg.mixed_precision,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps
     )
     # https://github.com/huggingface/transformers/issues/26548
@@ -321,7 +325,7 @@ def main():
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
     scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
 
-    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual)
+    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, use_batch_norms=False)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
 
     translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt = accelerator.prepare(
@@ -353,9 +357,11 @@ def main():
                             val_res[f"val/{flag}_{target_flag}_{k}"] = v
                 sims = eval_res[2] if len(eval_res) > 2 else None
                 if sims is not None:
-                    plt.figure(figsize=(36,30))
-                    sns.heatmap(sims, vmin=0, vmax=1).set(title='Heatmap of cosine similarities')
+                    plt.figure(figsize=(6,5))
+                    sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm').set(title='Heatmap of cosine similarities')
                     val_res['val_heatmap'] = wandb.Image(plt)
+                    val_res['val_top1_acc'] = eval_res[3]
+                    plt.close()
                 wandb.log(val_res)
 
                 # if early_stopper.early_stop(val_res['stop_cond']):

@@ -15,7 +15,8 @@ class MLPWithResidual(nn.Module):
             depth: int, 
             in_dim: int, 
             hidden_dim: int, 
-            out_dim: int, 
+            out_dim: int,
+            use_batch_norms: bool = True
         ):
         super().__init__()
         self.depth = depth
@@ -31,7 +32,7 @@ class MLPWithResidual(nn.Module):
                         nn.Linear(in_dim, hidden_dim),
                         nn.SiLU(),
                         nn.Dropout(p=0.01),
-                        nn.LayerNorm(hidden_dim),
+                        nn.BatchNorm1d(hidden_dim) if use_batch_norms else nn.Identity(),
                     )
                 )
             elif layer_idx < self.depth - 1:
@@ -40,7 +41,7 @@ class MLPWithResidual(nn.Module):
                         nn.Linear(hidden_dim, hidden_dim),
                         nn.SiLU(),
                         nn.Dropout(p=0.01),
-                        nn.LayerNorm(hidden_dim),
+                        nn.BatchNorm1d(hidden_dim) if use_batch_norms else nn.Identity(),
                     )
                 )
             else:
@@ -53,7 +54,7 @@ class MLPWithResidual(nn.Module):
                     )
                 )
 
-        self.output_layer = nn.LayerNorm(out_dim, elementwise_affine=True)
+        self.output_layer = nn.BatchNorm1d(out_dim) if use_batch_norms else nn.Identity()
         self.initialize_weights()
     
     def initialize_weights(self):
