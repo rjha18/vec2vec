@@ -17,7 +17,7 @@ val_size = 256
 [train]
 unsup_emb = 'gte'
 sup_emb = 'gtr'
-lr = 1e-5
+lr = 5e-5
 bs = 512
 save_every = 6_000
 epochs = 10
@@ -25,10 +25,10 @@ val_bs = 256
 dataset = "nq"
 max_grad_norm = 10.0
 gradient_accumulation_steps = 2
-loss_coefficient_rec = 0.01
-loss_coefficient_vsp = 1.5
+loss_coefficient_rec = 0.1
+loss_coefficient_vsp = 1.0
 loss_coefficient_cc = 1
-loss_coefficient_adv = 0.1
+loss_coefficient_adv = 0.5
 loss_coefficient_disc = 0.1
 add_noise = 0
 add_noise_rotation = 0
@@ -51,7 +51,7 @@ save_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/{}/'
 
 
 [discriminator]
-smooth = 0.8
+smooth = 0.9
 disc_dim = 1024
 disc_depth = 3
 disc_lr = 5e-5
