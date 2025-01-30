@@ -55,7 +55,6 @@ def training_loop_(
             print(f"Early stopping at {i} batches")
             break
         with accelerator.accumulate(translator), accelerator.autocast():
-            # assert that there is no overlap in keys (unsupervised assumption)
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
 
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
@@ -72,22 +71,20 @@ def training_loop_(
                     accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
                 )
 
-                # sup_to_sup = recons[cfg.sup_emb]
                 sup_to_sup = ins[cfg.sup_emb]
                 unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb].detach()
                 d_ss, d_us = disc(sup_to_sup), disc(unsup_to_sup)
 
-                disc_ce_A = F.binary_cross_entropy_with_logits(d_ss, torch.zeros((cfg.bs, 1), device=device) * (1 - cfg.smooth))
-                disc_ce_B = F.binary_cross_entropy_with_logits(d_us, torch.ones((cfg.bs, 1), device=device) * cfg.smooth)
-                disc_loss = disc_ce_A + disc_ce_B
-                disc_loss *= cfg.loss_coefficient_disc
-                # disc accuracy on sigmoid of d_ss and d_us
-                disc_acc_A = (torch.sigmoid(d_ss) < 0.5).sum().item() / cfg.bs
-                disc_acc_B = (torch.sigmoid(d_us) > 0.5).sum().item() / cfg.bs
+                disc_ce_real = F.binary_cross_entropy_with_logits(d_ss, torch.ones((cfg.bs, 1), device=device) * (1 - cfg.smooth))
+                disc_ce_fake = F.binary_cross_entropy_with_logits(d_us, torch.ones((cfg.bs, 1), device=device) * cfg.smooth)
+                disc_loss = (disc_ce_real + disc_ce_fake) / 2
+
+                disc_acc_real = (torch.sigmoid(d_ss) < 0.5).sum().item() / cfg.bs
+                disc_acc_fake = (torch.sigmoid(d_us) > 0.5).sum().item() / cfg.bs
 
                 translator.train()
                 disc_opt.zero_grad()
-                accelerator.backward(disc_loss)
+                accelerator.backward(disc_loss * cfg.loss_coefficient_disc)
                 accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
                 disc_opt.step()
             else:
@@ -96,23 +93,17 @@ def training_loop_(
             recons, translations = (
                 accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
             )
-    
+
             if cfg.loss_coefficient_adv > 0:
                 disc.eval()
-                # sup_to_sup = recons[cfg.sup_emb]
-                # sup_to_sup = ins[cfg.sup_emb]
                 unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb]
-                # d_ss, d_us = disc(sup_to_sup), disc(unsup_to_sup)
                 d_us = disc(unsup_to_sup)
 
-                # adv_loss_A = F.binary_cross_entropy_with_logits(d_ss, torch.ones((cfg.bs, 1), device=device))
-                # adv_loss_B = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device) * cfg.smooth)
-                adv_loss = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device))
-                #TODO accuracy here!
-                # adv_loss = adv_loss_A + adv_loss_B
+                gen_loss = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device))
+                gen_acc = (torch.sigmoid(d_us) < 0.5).sum().item() / cfg.bs
                 disc.train()
             else:
-                adv_loss = torch.tensor(0.0)
+                gen_loss = torch.tensor(0.0)
 
             rec_loss = rec_loss_fn(ins, recons, logger)
 
@@ -129,11 +120,9 @@ def training_loop_(
             else:
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
-            
+
             if cfg.loss_coefficient_vsp > 0:
-                # vsp_ins = {cfg.sup_emb: ins[cfg.sup_emb]}
-                vsp_ins = ins
-                vsp_loss = vsp_loss_fn(vsp_ins, cc_translations, logger)
+                vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
             else:
                 vsp_loss = torch.tensor(0.0)
 
@@ -141,7 +130,7 @@ def training_loop_(
                   (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
                 + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
-                + (adv_loss * cfg.loss_coefficient_adv)
+                + (gen_loss * cfg.loss_coefficient_adv)
             )
 
             opt.zero_grad()
@@ -158,13 +147,14 @@ def training_loop_(
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
                 "cc_rec_loss": cc_rec_loss.item(),
-                "cc_trans_loss": cc_trans_loss.item(), 
-                "adv_loss": adv_loss.item(),
+                "cc_trans_loss": cc_trans_loss.item(),
+                "gen_loss": gen_loss.item(),
                 "loss": loss.item(),
                 "grad_norm": grad_norm.item(),
                 "learning_rate": opt.param_groups[0]["lr"],
-                "disc_acc_A": disc_acc_A,
-                "disc_acc_B": disc_acc_B,
+                "disc_acc_real": disc_acc_real,
+                "disc_acc_fake": disc_acc_fake,
+                "gen_acc": gen_acc,
             }
 
             for metric, value in metrics.items():
@@ -174,10 +164,8 @@ def training_loop_(
                 dataloader_pbar.set_postfix(metrics)
 
         if (i + 1) % cfg.save_every == 0:
-            # save config
             with open(save_dir + 'config.toml', 'w') as f:
                 toml.dump(cfg.__dict__, f)
-            # save model
             torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
 
 
@@ -216,6 +204,7 @@ def main():
     translator = load_n_translator(cfg, encoder_dims)
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
+    disc_save_dir = os.path.join(save_dir, 'disc.pt')
 
     os.makedirs(save_dir, exist_ok=True)
     # print(f"Loading model from {cfg.load_dir}...")
@@ -224,7 +213,7 @@ def main():
     # if hasattr(cfg, 'freeze_params') and cfg.freeze_params:
     #     for param in translator.parameters():
     #         param.requires_grad = False
-    
+
     assert cfg.sup_emb != cfg.unsup_emb
 
     unsup_enc = {cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)}
@@ -278,11 +267,11 @@ def main():
         unsupset = unsupset.select(np.where(unsupmask)[0])
 
     sup_dataloader = DataLoader(
-        supset, 
-        batch_size=cfg.bs, 
-        num_workers=num_workers, 
-        shuffle=True, 
-        pin_memory=True, 
+        supset,
+        batch_size=cfg.bs,
+        num_workers=num_workers,
+        shuffle=True,
+        pin_memory=True,
         prefetch_factor=(8 if num_workers > 0 else None),
         collate_fn=MultiEncoderCollator(
             sup_encs, cfg.n_embs_per_batch, max_length=cfg.max_seq_length
@@ -305,11 +294,11 @@ def main():
 
     if use_val_set:
         valloader = DataLoader(
-            valset, 
+            valset,
             batch_size=cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
-            num_workers=num_workers, 
-            shuffle=False, 
-            pin_memory=True, 
+            num_workers=num_workers,
+            shuffle=False,
+            pin_memory=True,
             prefetch_factor=(8 if num_workers > 0 else None),
             collate_fn=MultiEncoderCollator(
                 {**sup_encs, **unsup_enc}, len({**sup_encs, **unsup_enc}), max_length=cfg.max_seq_length
@@ -333,6 +322,7 @@ def main():
     )
 
     best_model = None
+    best_disc = None
     early_stopper = EarlyStopper(
         patience=cfg.patience if hasattr(cfg, 'patience') else 1,
         min_delta=cfg.delta if hasattr(cfg, 'delta') else 0
@@ -368,7 +358,8 @@ def main():
                 #     print("Stopping early! Saving previous model...")
                 #     break
                 # else:
-                #     best_model = accelerator.unwrap_model(translator).state_dict().copy()
+                #     best_model = translator.state_dict().copy()
+                #     best_disc = disc.state_dict().copy()
 
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
@@ -398,7 +389,9 @@ def main():
         toml.dump(cfg.__dict__, f)
     # save model
     best_model = best_model if best_model is not None else accelerator.unwrap_model(translator).state_dict()
+    best_disc = best_disc if best_disc is not None else disc.state_dict()
     torch.save(best_model, model_save_dir)
+    torch.save(best_disc, disc_save_dir)
 
     # # eval
     # cfg.use_good_queries = 1

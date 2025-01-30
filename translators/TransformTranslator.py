@@ -105,16 +105,12 @@ class TransformTranslator(AbsNTranslator):
         }
 
         for flag in in_set:
-            if flag not in in_set:
-                continue
             noisy_emb = self._add_noise(ins[flag], max_noise_pow, min_noise_pow)
             if not self.use_target_vectors:
                 noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag])
             for target_flag in out_set:
                 if self.use_target_vectors:
                     noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag], self.target_vectors[target_flag])
-                if target_flag not in out_set:
-                    continue
                 # print(f'{flag} -> {target_flag}')
                 if target_flag == flag:
                     recons[flag] = self._out_project(noisy_rep, self.out_adapters[flag])
