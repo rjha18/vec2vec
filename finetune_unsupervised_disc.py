@@ -12,7 +12,6 @@ import wandb
 
 import torch
 from torch.optim.lr_scheduler import LambdaLR
-import torch.nn.functional as F
 
 from translators.Discriminator import Discriminator
 
@@ -20,15 +19,13 @@ from translators.Discriminator import Discriminator
 from utils.collate import MultiEncoderCollator
 from utils.dist import get_rank, get_world_size
 from utils.eval_utils import EarlyStopper, eval_loop_
-from utils.gan import VanillaGAN
+from utils.gan import VanillaGAN, RelativisticGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings, process_batch
 from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.wandb_logger import Logger
 
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 
 def training_loop_(
@@ -137,8 +134,6 @@ def training_loop_(
             with open(save_dir + 'config.toml', 'w') as f:
                 toml.dump(cfg.__dict__, f)
             torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
-
-
 
 # TODO: change embs to supervised_emb
 def main():
@@ -331,7 +326,13 @@ def main():
                 #     best_model = translator.state_dict().copy()
                 #     best_disc = disc.state_dict().copy()
         
-        gan = VanillaGAN(
+        if cfg.gan_style == "vanilla":
+            gan_cls = VanillaGAN
+        elif cfg.gan_style == "relativistic":
+            gan_cls = RelativisticGAN
+        else:
+            raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
+        gan = gan_cls(
             cfg=cfg, 
             generator=translator, 
             discriminator=disc, 
