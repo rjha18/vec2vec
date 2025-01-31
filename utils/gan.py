@@ -45,12 +45,6 @@ class VanillaGAN:
         )
         self.discriminator_opt.step()
         return disc_loss, disc_acc_real, disc_acc_fake
-
-    def step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float, float]:
-        if self.cfg.loss_coefficient_disc > 0:
-            return self._step_discriminator(real_data, fake_data)
-        else:
-            return torch.tensor(0.0), 0.0, 0.0
     
     def _step_generator(self, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
         self.discriminator.eval()
@@ -62,6 +56,12 @@ class VanillaGAN:
         gen_acc = (torch.sigmoid(d_fake) < 0.5).float().mean().item()
         self.discriminator.train()
         return gen_loss, gen_acc
+
+    def step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float, float]:
+        if self.cfg.loss_coefficient_disc > 0:
+            return self._step_discriminator(real_data, fake_data)
+        else:
+            return torch.tensor(0.0), 0.0, 0.0
     
     def step_generator(self, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
         if self.cfg.loss_coefficient_adv > 0:

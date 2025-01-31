@@ -72,11 +72,8 @@ def training_loop_(
             real_data = ins[cfg.sup_emb] # formerly sup_to_sup
             fake_data = translations[cfg.sup_emb][cfg.unsup_emb].detach() # formerly unsup_to_sup
             
-            disc_loss, disc_acc_real, disc_acc_fake = gan.step_discriminator(
+            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
                 real_data=real_data, 
-                fake_data=fake_data
-            )
-            gen_loss, gen_acc = gan.step_generator(
                 fake_data=fake_data
             )
 
