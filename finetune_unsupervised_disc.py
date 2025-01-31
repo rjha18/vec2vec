@@ -19,11 +19,12 @@ from translators.Discriminator import Discriminator
 # from eval import eval_model
 from utils.collate import MultiEncoderCollator
 from utils.dist import get_rank, get_world_size
-from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.eval_utils import EarlyStopper, eval_loop_
+from utils.gan import VanillaGAN
+from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
-from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.streaming_utils import load_streaming_embeddings, process_batch
+from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.wandb_logger import Logger
 
 import matplotlib.pyplot as plt
@@ -31,7 +32,7 @@ import seaborn as sns
 
 
 def training_loop_(
-    save_dir, accelerator, translator, disc, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, disc_opt, logger=None, max_num_batches=None
+    save_dir, accelerator, gan, translator, disc, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, disc_opt, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -68,41 +69,18 @@ def training_loop_(
             recons, translations = (
                 accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
             )
-            if cfg.loss_coefficient_disc > 0:
-                translator.eval()
-
-                sup_to_sup = ins[cfg.sup_emb]
-                unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb].detach()
-                d_ss, d_us = disc(sup_to_sup), disc(unsup_to_sup)
-
-                disc_ce_real = F.binary_cross_entropy_with_logits(d_ss, torch.ones((cfg.bs, 1), device=device) * (1 - cfg.smooth))
-                disc_ce_fake = F.binary_cross_entropy_with_logits(d_us, torch.ones((cfg.bs, 1), device=device) * cfg.smooth)
-                disc_loss = (disc_ce_real + disc_ce_fake) / 2
-
-                disc_acc_real = (torch.sigmoid(d_ss) < 0.5).sum().item() / cfg.bs
-                disc_acc_fake = (torch.sigmoid(d_us) > 0.5).sum().item() / cfg.bs
-
-                translator.train()
-                disc_opt.zero_grad()
-                accelerator.backward(disc_loss * cfg.loss_coefficient_disc)
-                accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
-                disc_opt.step()
-            else:
-                disc_loss = torch.tensor(0.0)
-
-            if cfg.loss_coefficient_adv > 0:
-                disc.eval()
-                unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb]
-                d_us = disc(unsup_to_sup)
-
-                gen_loss = F.binary_cross_entropy_with_logits(d_us, torch.zeros((cfg.bs, 1), device=device))
-                gen_acc = (torch.sigmoid(d_us) < 0.5).sum().item() / cfg.bs
-                disc.train()
-            else:
-                gen_loss = torch.tensor(0.0)
+            real_data = ins[cfg.sup_emb] # formerly sup_to_sup
+            fake_data = translations[cfg.sup_emb][cfg.unsup_emb].detach() # formerly unsup_to_sup
+            
+            disc_loss, disc_acc_real, disc_acc_fake = gan.step_discriminator(
+                real_data=real_data, 
+                fake_data=fake_data
+            )
+            gen_loss, gen_acc = gan.step_generator(
+                fake_data=fake_data
+            )
 
             rec_loss = rec_loss_fn(ins, recons, logger)
-
             if cfg.loss_coefficient_cc > 0:
                 cc_keys = list(translations.keys())
                 random.shuffle(cc_keys)
@@ -128,7 +106,6 @@ def training_loop_(
                 + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
                 + (gen_loss * cfg.loss_coefficient_adv)
             )
-
             opt.zero_grad()
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
@@ -358,7 +335,15 @@ def main():
                 # else:
                 #     best_model = translator.state_dict().copy()
                 #     best_disc = disc.state_dict().copy()
-
+        
+        gan = VanillaGAN(
+            cfg=cfg, 
+            generator=translator, 
+            discriminator=disc, 
+            generator_opt=opt, 
+            discriminator_opt=disc_opt, 
+            accelerato=accelerator
+        )
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:
@@ -370,6 +355,7 @@ def main():
             save_dir=save_dir,
             accelerator=accelerator,
             translator=translator,
+            gan=gan,
             disc=disc,
             sup_dataloader=sup_dataloader,
             unsup_dataloader=unsup_dataloader,
