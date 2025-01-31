@@ -46,8 +46,8 @@ heatmap_size = 16
 [logging]
 wandb_project = 'unsupervised_disc'
 wandb_name = 'unsupervised'
-load_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/model.pt'
-save_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/{}/'
+load_dir = '/finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/model.pt'
+save_dir = 'finetuning_unsupervised/{}/'
 
 
 [discriminator]

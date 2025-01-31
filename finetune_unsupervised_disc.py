@@ -342,7 +342,7 @@ def main():
             discriminator=disc, 
             generator_opt=opt, 
             discriminator_opt=disc_opt, 
-            accelerato=accelerator
+            accelerator=accelerator
         )
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
