@@ -2,12 +2,12 @@ import torch.nn as nn
 from translators.MLPWithResidual import MLPWithResidual
 
 class Discriminator(nn.Module):
-    def __init__(self, latent_dim, discriminator_dim=1024, depth=3, use_residual=False, use_batch_norms=False):
+    def __init__(self, latent_dim, discriminator_dim=1024, depth=3, use_residual=False, norm_style=None):
         super(Discriminator, self).__init__()
         self.latent_dim = latent_dim
 
         if use_residual:
-            self.discriminator = MLPWithResidual(depth, latent_dim, discriminator_dim, 1, use_batch_norms)
+            self.discriminator = MLPWithResidual(depth, latent_dim, discriminator_dim, 1, norm_style)
         else:
             assert depth >= 1
             layers = []

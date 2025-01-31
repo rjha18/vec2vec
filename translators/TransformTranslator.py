@@ -20,6 +20,7 @@ class TransformTranslator(AbsNTranslator):
         use_target_vectors: bool = True,
         use_small_output_adapters: bool = False,
         use_residual_adapters: bool = False,
+        norm_style: str = 'batch',
     ):
         super().__init__(encoder_dims, d_adapter, depth)
 
@@ -27,6 +28,7 @@ class TransformTranslator(AbsNTranslator):
         self.target_vectors = nn.ParameterDict()
         self.use_small_output_adapters = use_small_output_adapters
         self.use_residual_adapters = use_residual_adapters
+        self.norm_style = norm_style
         for flag, dims in encoder_dims.items():
             in_adapter, out_adapter = self._make_adapters(dims)
             self.in_adapters[flag] = in_adapter
@@ -66,7 +68,8 @@ class TransformTranslator(AbsNTranslator):
         assert dims is not None
         if self.use_residual_adapters:
             print("NOTE: Using residual adapters!")
-            return MLPWithResidual(self.depth, dims, self.d_hidden, self.d_adapter), MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims)
+            return MLPWithResidual(self.depth, dims, self.d_hidden, self.d_adapter, self.norm_style),\
+                   MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims, self.norm_style)
         in_adapter = []
         out_adapter = []
         for _ in range(self.depth):

@@ -22,7 +22,7 @@ from utils.dist import get_rank, get_world_size
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.eval_utils import EarlyStopper, eval_loop_
 from utils.utils import *
-from utils.train_utils import rec_loss_fn, trans_loss_fn, uni_loss_fn, vsp_loss_fn, get_grad_norm
+from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.streaming_utils import load_streaming_embeddings, process_batch
 from utils.wandb_logger import Logger
 
@@ -65,11 +65,11 @@ def training_loop_(
                 min_noise_pow = 0
                 max_noise_pow = 0
 
+            recons, translations = (
+                accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
+            )
             if cfg.loss_coefficient_disc > 0:
                 translator.eval()
-                recons, translations = (
-                    accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
-                )
 
                 sup_to_sup = ins[cfg.sup_emb]
                 unsup_to_sup = translations[cfg.sup_emb][cfg.unsup_emb].detach()
@@ -89,10 +89,6 @@ def training_loop_(
                 disc_opt.step()
             else:
                 disc_loss = torch.tensor(0.0)
-
-            recons, translations = (
-                accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
-            )
 
             if cfg.loss_coefficient_adv > 0:
                 disc.eval()
@@ -207,8 +203,6 @@ def main():
     disc_save_dir = os.path.join(save_dir, 'disc.pt')
 
     os.makedirs(save_dir, exist_ok=True)
-    # print(f"Loading model from {cfg.load_dir}...")
-    # translator.load_state_dict(torch.load(cfg.load_dir, map_location='cpu'), strict=False)
 
     # if hasattr(cfg, 'freeze_params') and cfg.freeze_params:
     #     for param in translator.parameters():
@@ -314,8 +308,12 @@ def main():
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
     scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
 
-    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, use_batch_norms=False)
+    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=None)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+
+    # # print(f"Loading model from {cfg.load_dir}...")
+    # translator.load_state_dict(torch.load(cfg.load_dir, map_location='cpu'), strict=False)
+    # disc.load_state_dict(torch.load(cfg.load_dir.replace('model', 'disc'), map_location='cpu'))
 
     translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt = accelerator.prepare(
         translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt

@@ -16,7 +16,7 @@ class MLPWithResidual(nn.Module):
             in_dim: int, 
             hidden_dim: int, 
             out_dim: int,
-            use_batch_norms: bool = True
+            norm_style: bool = 'batch'
         ):
         super().__init__()
         self.depth = depth
@@ -24,6 +24,15 @@ class MLPWithResidual(nn.Module):
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
+
+        assert norm_style in ['batch', 'layer', None]
+        batch_norm = None
+        if norm_style == 'batch':
+            batch_norm = nn.BatchNorm1d
+        elif norm_style == 'layer':
+            batch_norm = nn.LayerNorm
+
+
         for layer_idx in range(self.depth):
             ################################################################
             if layer_idx == 0:
@@ -32,7 +41,7 @@ class MLPWithResidual(nn.Module):
                         nn.Linear(in_dim, hidden_dim),
                         nn.SiLU(),
                         nn.Dropout(p=0.01),
-                        nn.BatchNorm1d(hidden_dim) if use_batch_norms else nn.Identity(),
+                        batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
                     )
                 )
             elif layer_idx < self.depth - 1:
@@ -41,7 +50,7 @@ class MLPWithResidual(nn.Module):
                         nn.Linear(hidden_dim, hidden_dim),
                         nn.SiLU(),
                         nn.Dropout(p=0.01),
-                        nn.BatchNorm1d(hidden_dim) if use_batch_norms else nn.Identity(),
+                        batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
                     )
                 )
             else:
@@ -54,7 +63,7 @@ class MLPWithResidual(nn.Module):
                     )
                 )
 
-        self.output_layer = nn.BatchNorm1d(out_dim) if use_batch_norms else nn.Identity()
+        self.output_layer = batch_norm(out_dim) if batch_norm is not None else nn.Identity()
         self.initialize_weights()
     
     def initialize_weights(self):
