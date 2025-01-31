@@ -25,12 +25,14 @@ class MLPWithResidual(nn.Module):
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
 
-        assert norm_style in ['batch', 'layer', None]
+        assert norm_style in ['batch', 'layer', 'spectral', None]
         batch_norm = None
         if norm_style == 'batch':
             batch_norm = nn.BatchNorm1d
         elif norm_style == 'layer':
             batch_norm = nn.LayerNorm
+        elif norm_style == 'spectral':
+            spec = nn.utils.spectral_norm
 
 
         for layer_idx in range(self.depth):
@@ -38,7 +40,7 @@ class MLPWithResidual(nn.Module):
             if layer_idx == 0:
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(in_dim, hidden_dim),
+                        nn.Linear(in_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(in_dim, hidden_dim)),
                         nn.SiLU(),
                         nn.Dropout(p=0.01),
                         batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
@@ -47,7 +49,7 @@ class MLPWithResidual(nn.Module):
             elif layer_idx < self.depth - 1:
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(hidden_dim, hidden_dim),
+                        nn.Linear(hidden_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, hidden_dim)),
                         nn.SiLU(),
                         nn.Dropout(p=0.01),
                         batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
@@ -56,10 +58,10 @@ class MLPWithResidual(nn.Module):
             else:
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(hidden_dim, hidden_dim),
+                        nn.Linear(hidden_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, hidden_dim)),
                         nn.Dropout(p=0.01),
                         nn.SiLU(),
-                        nn.Linear(hidden_dim, out_dim),
+                        nn.Linear(hidden_dim, out_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, out_dim)),
                     )
                 )
 

@@ -175,9 +175,6 @@ def main():
 
     use_val_set = hasattr(cfg, 'val_size')
 
-    assert hasattr(cfg, 'load_dir')
-    assert hasattr(cfg, 'unsup_emb')
-
     accelerator = accelerate.Accelerator(
         mixed_precision=cfg.mixed_precision,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps
@@ -208,6 +205,7 @@ def main():
     #     for param in translator.parameters():
     #         param.requires_grad = False
 
+    assert hasattr(cfg, 'unsup_emb')
     assert cfg.sup_emb != cfg.unsup_emb
 
     unsup_enc = {cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)}
@@ -308,12 +306,14 @@ def main():
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
     scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
 
-    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=None)
+    disc_norm = 'spectral' if hasattr(cfg, 'use_spectral') and cfg.use_spectral else None
+    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=disc_norm)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
-
-    # # print(f"Loading model from {cfg.load_dir}...")
-    # translator.load_state_dict(torch.load(cfg.load_dir, map_location='cpu'), strict=False)
-    # disc.load_state_dict(torch.load(cfg.load_dir.replace('model', 'disc'), map_location='cpu'))
+    if cfg.finetune_mode:
+        assert hasattr(cfg, 'load_dir')
+        print(f"Loading models from {cfg.load_dir}...")
+        translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
+        disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
 
     translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt = accelerator.prepare(
         translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt
@@ -331,8 +331,7 @@ def main():
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
-                eval_res = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
-                recons, trans = eval_res[0], eval_res[1]
+                recons, trans, heatmap = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
                 for flag, res in recons.items():
                     for k, v in res.items():
                         if k == 'cos':
@@ -343,13 +342,12 @@ def main():
                             if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
                                 continue
                             val_res[f"val/{flag}_{target_flag}_{k}"] = v
-                sims = eval_res[2] if len(eval_res) > 2 else None
-                if sims is not None:
-                    plt.figure(figsize=(6,5))
-                    sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm').set(title='Heatmap of cosine similarities')
-                    val_res['val_heatmap'] = wandb.Image(plt)
-                    val_res['val_top1_acc'] = eval_res[3]
-                    plt.close()
+                
+                if heatmap is not None:
+                    for k, v in heatmap.items():
+                        if k == 'heatmap':
+                            v = wandb.Image(v)
+                        val_res[f"val/{k}"] = v
                 wandb.log(val_res)
 
                 # if early_stopper.early_stop(val_res['stop_cond']):

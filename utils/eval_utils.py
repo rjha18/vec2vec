@@ -8,6 +8,9 @@ from sklearn.metrics.pairwise import cosine_distances
 
 from utils.streaming_utils import process_batch
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 def generate_text(inverter, embeddings, max_seq_length=32):
     gen_kwargs = {
@@ -111,15 +114,33 @@ def mean_dicts(full):
     
     recursive_mean(full)
 
+def create_heatmap(translator, ins, sup_emb, unsup_emb, top_1_size, heatmap_size=None):
+    res = {}
+    ins = {k: v[:top_1_size] for k, v in ins.items()}
+    trans = translator.translate_embeddings(ins[unsup_emb], unsup_emb, sup_emb)
+    sims = 1 - cosine_distances(ins[sup_emb].cpu(), trans.cpu())
+    res['top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
+    if heatmap_size is not None:
+        sims = sims[:heatmap_size, :heatmap_size]
+        res['heatmap_top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
+        fig, ax = plt.subplots(figsize=(6,5))
+        sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
+        ax.set_title('Heatmap of cosine similarities')
+        ax.set_xlabel('Fake')
+        ax.set_ylabel('Real')
+
+        res['heatmap'] = fig 
+        plt.close(fig)
+    return res
 
 def eval_loop_(
     cfg, translator, encoders, iter, pbar=None, device='cpu'
 ):
     recon_res = {}
     translation_res = {}
+    heatmap_res = None
 
-    make_heatmap = cfg.heatmap_size > 0 if hasattr(cfg, 'heatmap_size') else False
-    sims = None
+    compute_top_1 = cfg.top_1_size > 0 if hasattr(cfg, 'top_1_size') else False
     with torch.no_grad():
         n = 0
         for _, batch in enumerate(iter):
@@ -130,20 +151,14 @@ def eval_loop_(
             r_res, t_res = eval_batch(ins, recons, translations)
             merge_dicts(recon_res, r_res)
             merge_dicts(translation_res, t_res)
-            if make_heatmap:
-                assert hasattr(cfg, 'sup_emb') and hasattr(cfg, 'unsup_emb')
-                ins = {k: v[:cfg.heatmap_size] for k, v in ins.items()}
-                trans = translator.translate_embeddings(ins[cfg.unsup_emb], cfg.unsup_emb, cfg.sup_emb)
-                sims = 1 - cosine_distances(ins[cfg.sup_emb].cpu(), trans.cpu())
-                top1_acc = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
-                make_heatmap = False
+            if compute_top_1:
+                heatmap_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_1_size, cfg.heatmap_size)
+                compute_top_1 = False
             if pbar is not None:
                 pbar.update(1)
         mean_dicts(recon_res)
         mean_dicts(translation_res)
-        if sims is not None:
-            return recon_res, translation_res, sims, top1_acc
-        return recon_res, translation_res
+        return recon_res, translation_res, heatmap_res
 
 # TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.
 # def text_loop_(
