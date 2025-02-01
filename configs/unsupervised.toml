@@ -42,6 +42,7 @@ use_small_output_adapters = false
 use_residual_adapters = true
 no_scheduler = true
 heatmap_size = 16
+top_1_size = 128
 finetune_mode = false
 gan_style = "vanilla"
 

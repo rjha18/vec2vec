@@ -270,7 +270,7 @@ def main():
 
     max_num_epochs = int(math.ceil(cfg.epochs))
 
-    opt = torch.optim.AdamW(translator.parameters(), lr=cfg.lr, fused=False, weight_decay=0.01)
+    opt = torch.optim.AdamW(translator.parameters(), lr=cfg.lr, fused=False, weight_decay=0.00)
     steps_per_epoch = len(supset) // cfg.bs
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
     scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
