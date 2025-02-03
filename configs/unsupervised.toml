@@ -17,7 +17,7 @@ val_size = 256
 [train]
 unsup_emb = 'gte'
 sup_emb = 'gtr'
-lr = 5e-5
+lr = 1e-4
 bs = 512
 save_every = 6_000
 epochs = 10
@@ -41,22 +41,24 @@ use_target_vectors = false
 use_small_output_adapters = false
 use_residual_adapters = true
 no_scheduler = true
-heatmap_size = 16
 top_1_size = 128
+heatmap_size = 16
 finetune_mode = false
 gan_style = "vanilla"
 
 [logging]
 wandb_project = 'unsupervised_disc'
 wandb_name = 'unsupervised'
-load_dir = 'finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/model.pt'
-save_dir = 'finetuning_unsupervised/{}/'
+# load_dir = 'finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/model.pt'
+# save_dir = 'finetuning_unsupervised/{}/'
+load_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
+save_dir = '/share/shmatikov/rishi/edx/finetuning_unsupervised/{}/'
 
 
 [discriminator]
 smooth = 0.9
 disc_dim = 1024
 disc_depth = 3
-disc_lr = 5e-5
+disc_lr = 1e-4
 eps = 6.25e-10
 use_residual = true
