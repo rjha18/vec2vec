@@ -11,3 +11,4 @@ embeddings/
 log_submitit/
 model_weights/
 datasets/
+finetuning_unsupervised/

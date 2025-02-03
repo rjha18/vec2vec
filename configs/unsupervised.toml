@@ -44,6 +44,7 @@ no_scheduler = true
 top_1_size = 128
 heatmap_size = 16
 finetune_mode = false
+gan_style = "vanilla"
 
 [logging]
 wandb_project = 'unsupervised_disc'
