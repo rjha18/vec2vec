@@ -38,6 +38,7 @@ class MLPWithResidual(nn.Module):
         for layer_idx in range(self.depth):
             ################################################################
             if layer_idx == 0:
+                hidden_dim = out_dim if self.depth == 1 else hidden_dim
                 self.layers.append(
                     nn.Sequential(
                         nn.Linear(in_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(in_dim, hidden_dim)),
