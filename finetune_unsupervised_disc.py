@@ -67,28 +67,28 @@ def training_loop_(
                 accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow, include_reps=True)
             )
 
+            real_data = reps[cfg.sup_emb]
+            fake_data = reps[cfg.unsup_emb]
+
+            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
+                real_data=real_data,
+                fake_data=fake_data
+            )
+
             rec_loss = rec_loss_fn(ins, recons, logger)
             if cfg.loss_coefficient_cc > 0:
                 cc_keys = list(translations.keys())
                 random.shuffle(cc_keys)
                 cc_translations = dict(
                     itertools.chain(*[{ k1: v.detach()  for v in translations[k1].values()}.items() for k1 in cc_keys]))
-                cc_recons, cc_translations, cc_reps = (
-                    accelerator.unwrap_model(translator).forward(cc_translations, max_noise_pow, min_noise_pow, include_reps=True)
+                cc_recons, cc_translations = (
+                    accelerator.unwrap_model(translator).forward(cc_translations, max_noise_pow, min_noise_pow)
                 )
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
             else:
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
-
-            real_data = torch.cat([reps[cfg.sup_emb], cc_reps[cfg.sup_emb]], dim=0)
-            fake_data = torch.cat([reps[cfg.unsup_emb], cc_reps[cfg.unsup_emb]], dim=0)
-
-            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-                real_data=real_data,
-                fake_data=fake_data
-            )
 
             if cfg.loss_coefficient_vsp > 0:
                 vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
