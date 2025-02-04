@@ -16,7 +16,8 @@ class MLPWithResidual(nn.Module):
             in_dim: int, 
             hidden_dim: int, 
             out_dim: int,
-            norm_style: bool = 'batch'
+            norm_style: bool = 'batch',
+            output_norm: bool = True,
         ):
         super().__init__()
         self.depth = depth
@@ -66,7 +67,7 @@ class MLPWithResidual(nn.Module):
                     )
                 )
 
-        self.output_layer = batch_norm(out_dim) if batch_norm is not None else nn.Identity()
+        self.output_layer = batch_norm(out_dim) if batch_norm is not None and output_norm else nn.Identity()
         self.initialize_weights()
     
     def initialize_weights(self):

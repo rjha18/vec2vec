@@ -69,7 +69,7 @@ class TransformTranslator(AbsNTranslator):
         if self.use_residual_adapters:
             print("NOTE: Using residual adapters!")
             return MLPWithResidual(self.depth, dims, self.d_hidden, self.d_adapter, self.norm_style),\
-                   MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims, self.norm_style)
+                   MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims, self.norm_style, output_norm=False)
         in_adapter = []
         out_adapter = []
         for _ in range(self.depth):
