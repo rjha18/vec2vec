@@ -2,38 +2,43 @@ import torch
 import torch.nn.functional as F
 
 
+rmse = lambda x, y: ((x - y) ** 2).sum(dim=1).sqrt().mean()
+
 def rec_loss_fn(ins, recons, logger, prefix=""):
     assert ins.keys() == recons.keys()
     loss = None
     for flag, emb in ins.items():
-        mse_loss = ((recons[flag] - emb) ** 2).sum(dim=1).sqrt().mean()
-        logger.logkv(f"{prefix}{flag}_recons", mse_loss)
+        recons_loss = 1 - F.cosine_similarity(emb, recons[flag], dim=1).mean()
+        logger.logkv(f"{prefix}{flag}_recons_rmse", rmse(emb, recons[flag]))
+        logger.logkv(f"{prefix}{flag}_recons_cos", recons_loss)
         if loss is None:
-            loss = mse_loss
+            loss = recons_loss
         else:
-            loss += mse_loss
+            loss += recons_loss
     return loss / len(ins)
 
 
 def uni_loss_fn(emb, trans, src_emb, tgt_emb, logger):
-    trans_loss = ((emb - trans) ** 2).sum(dim=1).sqrt().mean()
-    logger.logkv(f"{src_emb}_{tgt_emb}_cos", F.cosine_similarity(emb, trans, dim=1).mean())
-    return trans_loss
+    uni_loss = 1 - F.cosine_similarity(emb, trans, dim=1).mean()
+    logger.logkv(f"{src_emb}_{tgt_emb}_uni_rmse", rmse(emb, trans))
+    logger.logkv(f"{src_emb}_{tgt_emb}_uni_cos", uni_loss)
+    return uni_loss
+
 
 def trans_loss_fn(ins, translations, logger, prefix=""):
     assert ins.keys() == translations.keys()
     loss = None
     for target_flag, emb in ins.items():
         for flag, trans in translations[target_flag].items():
-            mse_loss = ((emb - trans) ** 2).sum(dim=1).sqrt().mean()
-            logger.logkv(f"{prefix}{flag}_{target_flag}_trans", mse_loss)
+            trans_loss = 1 - F.cosine_similarity(emb, trans, dim=1).mean()
+            logger.logkv(f"{prefix}{flag}_{target_flag}_trans_rmse", rmse(emb, trans))
+            logger.logkv(f"{prefix}{flag}_{target_flag}_trans_cos", trans_loss)
             
-        if loss is None:
-            loss = mse_loss
-        else:
-            loss += mse_loss
+            if loss is None:
+                loss = trans_loss
+            else:
+                loss += trans_loss
 
-        logger.logkv(f"{prefix}{flag}_{target_flag}_cos", F.cosine_similarity(emb, trans, dim=1).mean())
     return (loss / len(ins))
 
 
