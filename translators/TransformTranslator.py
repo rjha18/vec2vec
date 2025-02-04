@@ -98,6 +98,7 @@ class TransformTranslator(AbsNTranslator):
         min_noise_pow: float = 0,
         in_set: set[str] = None,
         out_set: set[str] = None,
+        include_reps: bool = False,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         in_set = in_set if in_set is not None else ins.keys()
         out_set = out_set if out_set is not None else ins.keys()
@@ -106,20 +107,27 @@ class TransformTranslator(AbsNTranslator):
         translations = {
             flag: {} for flag in out_set
         }
+        reps = translations.copy() if self.use_target_vectors else recons.copy()
 
         for flag in in_set:
             noisy_emb = self._add_noise(ins[flag], max_noise_pow, min_noise_pow)
             if not self.use_target_vectors:
                 noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag])
+                if include_reps:
+                    reps[flag] = noisy_rep
             for target_flag in out_set:
                 if self.use_target_vectors:
                     noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag], self.target_vectors[target_flag])
+                    if include_reps:
+                        reps[target_flag][flag] = noisy_rep
                 # print(f'{flag} -> {target_flag}')
                 if target_flag == flag:
                     recons[flag] = self._out_project(noisy_rep, self.out_adapters[flag])
                 else:
                     translations[target_flag][flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
 
+        if include_reps:
+            return recons, translations, reps
         return recons, translations
 
     def _add_noise(self, emb, max_noise_pow, min_noise_pow):

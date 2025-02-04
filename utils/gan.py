@@ -70,7 +70,7 @@ class VanillaGAN:
     def step(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[
             torch.Tensor, torch.Tensor, float, float, float]:
         disc_loss, disc_acc_real, disc_acc_fake = self.step_discriminator(
-            real_data=real_data,
+            real_data=real_data.detach(),
             fake_data=fake_data.detach()
         )
         gen_loss, gen_acc = self.step_generator(
