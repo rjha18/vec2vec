@@ -41,7 +41,7 @@ use_target_vectors = false
 use_small_output_adapters = false
 use_residual_adapters = true
 no_scheduler = true
-top_1_size = 128
+top_k_size = 128
 heatmap_size = 16
 k = 16
 finetune_mode = false
@@ -50,8 +50,6 @@ gan_style = "vanilla"
 [logging]
 wandb_project = 'unsupervised_disc'
 wandb_name = 'unsupervised'
-# load_dir = 'finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/model.pt'
-# save_dir = 'finetuning_unsupervised/{}/'
 load_dir = './finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
 save_dir = './finetuning_unsupervised/{}/'
 

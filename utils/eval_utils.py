@@ -114,18 +114,25 @@ def mean_dicts(full):
     
     recursive_mean(full)
 
+
+def top_k_accuracy(sims, k=1):
+    top_k_preds = np.argsort(sims, axis=1)[:, -k:]  # Get indices of top-k predictions
+    correct = np.arange(sims.shape[0])[:, None]  # Ground truth indices
+    return np.mean(np.any(top_k_preds == correct, axis=1))  # Check if correct label is in top-k
+
+
 def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16):
     res = {}
     ins = {k: v[:top_k_size] for k, v in ins.items()}
     trans = translator.translate_embeddings(ins[unsup_emb], unsup_emb, sup_emb)
     sims = 1 - cosine_distances(ins[sup_emb].cpu(), trans.cpu())
     res['top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
-    res[f'top_{k}_acc'] = np.mean(np.max(sims, axis=1) >= np.sort(sims, axis=1)[:, -{k}])
+    res['top_k_acc'] = top_k_accuracy(sims, k)
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
         res['heatmap_top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
         if heatmap_size > k:
-            res[f'heatmap_top_{k}_acc'] = np.mean(np.max(sims, axis=1) >= np.sort(sims, axis=1)[:, -{k}])
+            res[f'heatmap_top_{k}_acc'] = top_k_accuracy(sims, k)
         fig, ax = plt.subplots(figsize=(6,5))
         sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities')
