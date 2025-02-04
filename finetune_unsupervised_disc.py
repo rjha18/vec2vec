@@ -63,9 +63,7 @@ def training_loop_(
                 min_noise_pow = 0
                 max_noise_pow = 0
 
-            recons, translations, reps = (
-                accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow, include_reps=True)
-            )
+            recons, translations, reps = translator(ins, max_noise_pow, min_noise_pow, include_reps=True)
 
             real_data = reps[cfg.sup_emb]
             fake_data = reps[cfg.unsup_emb]
@@ -81,9 +79,7 @@ def training_loop_(
                 random.shuffle(cc_keys)
                 cc_translations = dict(
                     itertools.chain(*[{ k1: v.detach()  for v in translations[k1].values()}.items() for k1 in cc_keys]))
-                cc_recons, cc_translations = (
-                    accelerator.unwrap_model(translator).forward(cc_translations, max_noise_pow, min_noise_pow)
-                )
+                cc_recons, cc_translations = translator(cc_translations, max_noise_pow, min_noise_pow)
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
             else:
