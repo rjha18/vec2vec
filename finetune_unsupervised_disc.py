@@ -63,15 +63,8 @@ def training_loop_(
                 min_noise_pow = 0
                 max_noise_pow = 0
 
-            recons, translations = (
-                accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
-            )
-            real_data = ins[cfg.sup_emb] # formerly sup_to_sup
-            fake_data = translations[cfg.sup_emb][cfg.unsup_emb] # formerly unsup_to_sup
-
-            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-                real_data=real_data,
-                fake_data=fake_data
+            recons, translations, reps = (
+                accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow, include_reps=True)
             )
 
             rec_loss = rec_loss_fn(ins, recons, logger)
@@ -80,14 +73,22 @@ def training_loop_(
                 random.shuffle(cc_keys)
                 cc_translations = dict(
                     itertools.chain(*[{ k1: v.detach()  for v in translations[k1].values()}.items() for k1 in cc_keys]))
-                cc_recons, cc_translations = (
-                    accelerator.unwrap_model(translator).forward(cc_translations, max_noise_pow, min_noise_pow)
+                cc_recons, cc_translations, cc_reps = (
+                    accelerator.unwrap_model(translator).forward(cc_translations, max_noise_pow, min_noise_pow, include_reps=True)
                 )
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
             else:
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
+
+            real_data = torch.cat([reps[cfg.sup_emb], cc_reps[cfg.sup_emb]], dim=0)
+            fake_data = torch.cat([reps[cfg.unsup_emb], cc_reps[cfg.unsup_emb]], dim=0)
+
+            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
+                real_data=real_data,
+                fake_data=fake_data
+            )
 
             if cfg.loss_coefficient_vsp > 0:
                 vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
@@ -276,7 +277,7 @@ def main():
     scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
 
     disc_norm = 'spectral' if hasattr(cfg, 'use_spectral') and cfg.use_spectral else None
-    disc = Discriminator(768, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=disc_norm)
+    disc = Discriminator(cfg.d_adapter, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=disc_norm)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
