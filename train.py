@@ -27,7 +27,6 @@ from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_
 from utils.wandb_logger import Logger
 
 
-
 def training_loop_(
     save_dir, accelerator, gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
 ):
@@ -97,14 +96,14 @@ def training_loop_(
                 + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
                 + (gen_loss * cfg.loss_coefficient_adv)
             )
+            exit_on_nan(loss)
             opt.zero_grad()
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
             grad_norm = get_grad_norm(translator)
 
             opt.step()
-            if not hasattr(cfg, 'no_scheduler') or not cfg.no_scheduler:
-                scheduler.step()
+            scheduler.step()
 
             metrics = {
                 "disc_loss": disc_loss.item(),
@@ -270,8 +269,18 @@ def main():
     opt = torch.optim.AdamW(translator.parameters(), lr=cfg.lr, fused=False, weight_decay=0.00)
     steps_per_epoch = len(supset) // cfg.bs
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
-    scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
-
+    if not hasattr(cfg, 'no_scheduler') or not cfg.no_scheduler:
+        # linear
+        scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
+    else:
+        # constant with warmup
+        warmup_length = 100 * get_world_size()
+        def lr_lambda(step):
+            if step < warmup_length:
+                return min(1, step / warmup_length)
+            else:
+                return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
+        scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
     disc_norm = 'spectral' if hasattr(cfg, 'use_spectral') and cfg.use_spectral else None
     disc = Discriminator(cfg.d_adapter, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=disc_norm)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)

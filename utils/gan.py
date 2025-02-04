@@ -85,15 +85,10 @@ class RelativisticGAN(VanillaGAN):
         self.generator.eval()
         d_real_logits = self.discriminator(real_data)
         d_fake_logits = self.discriminator(fake_data)
-        avg_fake_logits = d_fake_logits.mean()
-        avg_real_logits = d_real_logits.mean()
 
-        d_real_rel = torch.sigmoid(d_real_logits - avg_fake_logits)
-        d_fake_rel = torch.sigmoid(d_fake_logits - avg_real_logits)
-
-        disc_loss = -torch.mean(torch.log(d_real_rel) + torch.log(1 - d_fake_rel))
-        disc_acc_real = (d_real_logits > avg_fake_logits).float().mean().item()
-        disc_acc_fake = (d_fake_logits < avg_real_logits).float().mean().item()
+        disc_loss = F.binary_cross_entropy_with_logits(d_fake_logits - d_real_logits, torch.ones_like(d_real_logits))
+        disc_acc_real = (d_real_logits > d_fake_logits).float().mean().item()
+        disc_acc_fake = 1.0 - disc_acc_real
 
         self.generator.train()
         self.discriminator_opt.zero_grad()
@@ -111,15 +106,8 @@ class RelativisticGAN(VanillaGAN):
 
         d_real_logits = self.discriminator(real_data)
         d_fake_logits = self.discriminator(fake_data)
+        gen_loss = F.binary_cross_entropy_with_logits(d_real_logits - d_fake_logits, torch.ones_like(d_real_logits))
 
-        avg_real_logits = d_real_logits.mean()
-        avg_fake_logits = d_fake_logits.mean()
-
-        d_fake_rel = torch.sigmoid(d_fake_logits - avg_real_logits)
-        d_real_rel = torch.sigmoid(d_real_logits - avg_fake_logits)
-
-        gen_loss = -torch.mean(torch.log(d_fake_rel) + torch.log(1 - d_real_rel))
-        gen_acc = (d_fake_logits > avg_real_logits).float().mean().item()
-
+        gen_acc = (d_real_logits > d_fake_logits).float().mean().item()
         self.discriminator.train()
         return gen_loss, gen_acc

@@ -170,3 +170,9 @@ def load_translator_from_hf(model_id):
     translator = load_n_translator(cfg, cfg.encoder_dims)
     translator.load_state_dict(state_dict, strict=False)
     return translator
+
+
+def exit_on_nan(loss: torch.Tensor) -> None:
+    if torch.isnan(loss).any():
+        print("Loss is NaN! exiting")
+        exit(1)
