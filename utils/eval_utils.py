@@ -114,15 +114,18 @@ def mean_dicts(full):
     
     recursive_mean(full)
 
-def create_heatmap(translator, ins, sup_emb, unsup_emb, top_1_size, heatmap_size=None):
+def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16):
     res = {}
-    ins = {k: v[:top_1_size] for k, v in ins.items()}
+    ins = {k: v[:top_k_size] for k, v in ins.items()}
     trans = translator.translate_embeddings(ins[unsup_emb], unsup_emb, sup_emb)
     sims = 1 - cosine_distances(ins[sup_emb].cpu(), trans.cpu())
     res['top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
+    res[f'top_{k}_acc'] = np.mean(np.max(sims, axis=1) >= np.sort(sims, axis=1)[:, -{k}])
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
         res['heatmap_top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
+        if heatmap_size > k:
+            res[f'heatmap_top_{k}_acc'] = np.mean(np.max(sims, axis=1) >= np.sort(sims, axis=1)[:, -{k}])
         fig, ax = plt.subplots(figsize=(6,5))
         sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities')
@@ -140,7 +143,7 @@ def eval_loop_(
     translation_res = {}
     heatmap_res = None
 
-    compute_top_1 = cfg.top_1_size > 0 if hasattr(cfg, 'top_1_size') else False
+    compute_top_k = cfg.top_k_size > 0 if hasattr(cfg, 'top_k_size') and hasattr(cfg, 'k') else False
     with torch.no_grad():
         n = 0
         for _, batch in enumerate(iter):
@@ -151,9 +154,9 @@ def eval_loop_(
             r_res, t_res = eval_batch(ins, recons, translations)
             merge_dicts(recon_res, r_res)
             merge_dicts(translation_res, t_res)
-            if compute_top_1:
-                heatmap_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_1_size, cfg.heatmap_size)
-                compute_top_1 = False
+            if compute_top_k:
+                heatmap_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, cfg.heatmap_size, cfg.k)
+                compute_top_k = False
             if pbar is not None:
                 pbar.update(1)
         mean_dicts(recon_res)
