@@ -29,7 +29,7 @@ from utils.wandb_logger import Logger
 
 
 def training_loop_(
-    save_dir, accelerator, gan, translator, disc, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, disc_opt, logger=None, max_num_batches=None
+    save_dir, accelerator, gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -67,10 +67,10 @@ def training_loop_(
                 accelerator.unwrap_model(translator).forward(ins, max_noise_pow, min_noise_pow)
             )
             real_data = ins[cfg.sup_emb] # formerly sup_to_sup
-            fake_data = translations[cfg.sup_emb][cfg.unsup_emb].detach() # formerly unsup_to_sup
-            
+            fake_data = translations[cfg.sup_emb][cfg.unsup_emb] # formerly unsup_to_sup
+
             disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-                real_data=real_data, 
+                real_data=real_data,
                 fake_data=fake_data
             )
 
@@ -311,7 +311,7 @@ def main():
                             if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
                                 continue
                             val_res[f"val/{flag}_{target_flag}_{k}"] = v
-                
+
                 if heatmap is not None:
                     for k, v in heatmap.items():
                         if k == 'heatmap':
@@ -325,7 +325,7 @@ def main():
                 # else:
                 #     best_model = translator.state_dict().copy()
                 #     best_disc = disc.state_dict().copy()
-        
+
         if cfg.gan_style == "vanilla":
             gan_cls = VanillaGAN
         elif cfg.gan_style == "relativistic":
@@ -333,11 +333,11 @@ def main():
         else:
             raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
         gan = gan_cls(
-            cfg=cfg, 
-            generator=translator, 
-            discriminator=disc, 
-            generator_opt=opt, 
-            discriminator_opt=disc_opt, 
+            cfg=cfg,
+            generator=translator,
+            discriminator=disc,
+            generator_opt=opt,
+            discriminator_opt=disc_opt,
             accelerator=accelerator
         )
         max_num_batches = None
@@ -352,7 +352,6 @@ def main():
             accelerator=accelerator,
             translator=translator,
             gan=gan,
-            disc=disc,
             sup_dataloader=sup_dataloader,
             unsup_dataloader=unsup_dataloader,
             sup_encs=sup_encs,
@@ -360,7 +359,6 @@ def main():
             cfg=cfg,
             opt=opt,
             scheduler=scheduler,
-            disc_opt=disc_opt,
             logger=logger,
             max_num_batches=max_num_batches
         )
