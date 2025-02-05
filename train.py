@@ -19,7 +19,7 @@ from translators.Discriminator import Discriminator
 from utils.collate import MultiEncoderCollator
 from utils.dist import get_rank, get_world_size
 from utils.eval_utils import EarlyStopper, eval_loop_
-from utils.gan import VanillaGAN, RelativisticGAN
+from utils.gan import VanillaGAN, RelativisticGAN, WassersteinGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings, process_batch
@@ -336,6 +336,8 @@ def main():
             gan_cls = VanillaGAN
         elif cfg.gan_style == "relativistic":
             gan_cls = RelativisticGAN
+        elif cfg.gan_style == "wasserstein":
+            gan_cls = WassersteinGAN
         else:
             raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
         gan = gan_cls(
