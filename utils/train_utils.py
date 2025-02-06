@@ -48,7 +48,7 @@ def vsp_loss_fn(ins, translations, logger) -> torch.Tensor:
     count = 0
     for out_name in ins.keys():
         if out_name not in translations: continue # skip for unidirectional version
-        B = ins[out_name]
+        B = ins[out_name].detach()
         B = B / (B.norm(dim=1, keepdim=True) + EPS)
         in_sims = B @ B.T
         for in_name in translations[out_name].keys():
@@ -56,7 +56,11 @@ def vsp_loss_fn(ins, translations, logger) -> torch.Tensor:
             A = translations[out_name][in_name]
             A = A / (A.norm(dim=1, keepdim=True) + EPS)
             out_sims = A @ A.T
-            vsp_loss = (in_sims - out_sims).abs().mean()
+            out_sims_reflected = A @ B.T
+            vsp_loss = (
+                  (in_sims - out_sims).abs().mean()
+                + (in_sims - out_sims_reflected).abs().mean()
+            )
             if logger is not None:
                 logger.logkv(f"{in_name}_{out_name}_vsp", vsp_loss)
 

@@ -50,9 +50,7 @@ class TransformTranslator(AbsNTranslator):
         noisy_embeddings = self._add_noise(embeddings, max_noise_pow, min_noise_pow)
         target_vector = self.target_vectors[out_name] if self.use_target_vectors else None
         latents = self._get_latents(emb=noisy_embeddings, in_adapter=in_adapter, target_vector=target_vector)
-
-        out_adapter = self.out_adapters[out_name]
-        return self._out_project(latents, out_adapter)
+        return self._out_project(latents,  self.out_adapters[out_name])
 
     def add_encoders(self, encoder_dims: dict[str, int], overwrite_embs: list[str] = None):
         for flag, dims in encoder_dims.items():

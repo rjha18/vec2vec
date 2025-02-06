@@ -127,8 +127,7 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
     trans = translator.translate_embeddings(ins[unsup_emb], unsup_emb, sup_emb)
     ins_norm = F.normalize(ins[sup_emb].cpu(), p=2, dim=1)
     trans_norm = F.normalize(trans.cpu(), p=2, dim=1)
-    cosine_distances = ins_norm @ trans_norm.T
-    sims = (1 - cosine_distances).numpy()
+    sims = (ins_norm @ trans_norm.T).numpy()
     res['top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
     res[f'top_{k}_acc'] = top_k_accuracy(sims, k)
     if heatmap_size is not None:

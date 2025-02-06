@@ -246,10 +246,10 @@ def main():
     sup_dataloader = DataLoader(
         supset,
         batch_size=cfg.bs,
-        num_workers=num_workers,
+        num_workers=num_workers // 2,
         shuffle=True,
         pin_memory=True,
-        prefetch_factor=(8 if num_workers > 0 else None),
+        prefetch_factor=None,
         collate_fn=TokenizedCollator(),
         drop_last=True,
     )
@@ -257,10 +257,10 @@ def main():
     unsup_dataloader = DataLoader(
         unsupset,
         batch_size=cfg.bs,
-        num_workers=num_workers,
+        num_workers=num_workers // 2,
         shuffle=True,
         pin_memory=True,
-        prefetch_factor=(8 if num_workers > 0 else None),
+        prefetch_factor=None,
         collate_fn=TokenizedCollator(),
         drop_last=True,
     )
