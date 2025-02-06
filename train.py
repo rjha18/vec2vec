@@ -69,7 +69,9 @@ def training_loop_(
                 cc_keys = list(translations.keys())
                 random.shuffle(cc_keys)
                 cc_translations = dict(
-                    itertools.chain(*[{ k1: v.detach()  for v in translations[k1].values()}.items() for k1 in cc_keys]))
+                    itertools.chain(*[{
+                        k1: v.detach() if hasattr(cfg, 'cc_detach') and cfg.cc_detach else v for v in translations[k1].values()
+                    }.items() for k1 in cc_keys]))
                 cc_recons, cc_translations, cc_reps = translator(cc_translations, max_noise_pow, min_noise_pow, include_reps=True)
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
@@ -145,6 +147,9 @@ def main():
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
 
+    random.seed(cfg.seed + get_rank())
+    torch.manual_seed(cfg.seed + get_rank())
+
     use_val_set = hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
@@ -199,9 +204,6 @@ def main():
         dummy=(cfg.wandb_project is None) or not (cfg.use_wandb),
         config=cfg,
     )
-
-    random.seed(cfg.seed + get_rank())
-    torch.manual_seed(cfg.seed + get_rank())
 
     num_workers = get_num_proc()
     print(f"Rank {get_rank()} using {num_workers} workers and {len(dset)} datapoints")
@@ -308,6 +310,21 @@ def main():
         min_delta=cfg.delta if hasattr(cfg, 'delta') else 0
     )
 
+    if cfg.gan_style == "vanilla":
+        gan_cls = VanillaGAN
+    elif cfg.gan_style == "relativistic":
+        gan_cls = RelativisticGAN
+    else:
+        raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
+    gan = gan_cls(
+        cfg=cfg,
+        generator=translator,
+        discriminator=disc,
+        generator_opt=opt,
+        discriminator_opt=disc_opt,
+        accelerator=accelerator
+    )
+
     for epoch in range(max_num_epochs):
         if use_val_set and get_rank() == 0:
             with torch.no_grad(), accelerator.autocast():
@@ -339,20 +356,6 @@ def main():
                 #     best_model = translator.state_dict().copy()
                 #     best_disc = disc.state_dict().copy()
 
-        if cfg.gan_style == "vanilla":
-            gan_cls = VanillaGAN
-        elif cfg.gan_style == "relativistic":
-            gan_cls = RelativisticGAN
-        else:
-            raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
-        gan = gan_cls(
-            cfg=cfg,
-            generator=translator,
-            discriminator=disc,
-            generator_opt=opt,
-            discriminator_opt=disc_opt,
-            accelerator=accelerator
-        )
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:

@@ -1,11 +1,11 @@
 [general]
 use_wandb = 1
 seed = 0
-style = 'unet'
-d_adapter = 512
+style = 'res_mlp'
+d_adapter = 128
 d_hidden = 1024
 normalize_embeddings = true
-depth = 3
+depth = 2
 # embs = [ "gte", "gtr", "stella", "sentence-t5", "e5", "snowflake", "ember", "sbert", "gist", "clip", "bert-nli",]
 lm_base_name = "google-bert/bert-base-uncased"
 upscale_num = 16
@@ -46,6 +46,11 @@ heatmap_size = 16
 k = 16
 finetune_mode = false
 gan_style = "vanilla"
+cc_detach = true
+use_spectral = true
+norm_style = "batch"
+transform_depth = 5
+d_transform = 512
 
 [logging]
 wandb_project = 'unsupervised_disc'
@@ -56,7 +61,7 @@ save_dir = './finetuning_unsupervised/{}/'
 
 [discriminator]
 smooth = 0.9
-disc_dim = 1024
+disc_dim = 512
 disc_depth = 3
 disc_lr = 1e-4
 eps = 6.25e-10
