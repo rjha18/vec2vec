@@ -121,11 +121,14 @@ def top_k_accuracy(sims, k=1):
     return np.mean(np.any(top_k_preds == correct, axis=1))  # Check if correct label is in top-k
 
 
-def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16):
+def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16) -> dict:
     res = {}
     ins = {k: v[:top_k_size] for k, v in ins.items()}
     trans = translator.translate_embeddings(ins[unsup_emb], unsup_emb, sup_emb)
-    sims = 1 - cosine_distances(ins[sup_emb].cpu(), trans.cpu())
+    ins_norm = F.normalize(ins[sup_emb].cpu(), p=2, dim=1)
+    trans_norm = F.normalize(trans.cpu(), p=2, dim=1)
+    cosine_distances = ins_norm @ trans_norm.T
+    sims = (1 - cosine_distances).numpy()
     res['top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
     res[f'top_{k}_acc'] = top_k_accuracy(sims, k)
     if heatmap_size is not None:
@@ -133,14 +136,28 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
         res['heatmap_top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
         if heatmap_size > k:
             res[f'heatmap_top_{k}_acc'] = top_k_accuracy(sims, k)
+
+        # plot sims
         fig, ax = plt.subplots(figsize=(6,5))
         sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities')
         ax.set_xlabel('Fake')
         ax.set_ylabel('Real')
-
+        plt.tight_layout()
         res['heatmap'] = fig 
         plt.close(fig)
+    
+        # plot sims w/ softmax
+        fig, ax = plt.subplots(figsize=(6,5))
+        sims_softmax = F.softmax(torch.tensor(sims), dim=1).numpy()
+        sns.heatmap(sims_softmax, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
+        ax.set_title('Heatmap of cosine similarities (softmaxed)')
+        ax.set_xlabel('Fake')
+        ax.set_ylabel('Real')
+        plt.tight_layout()
+        res['heatmap_softmax'] = fig 
+        plt.close(fig)
+
     return res
 
 def eval_loop_(

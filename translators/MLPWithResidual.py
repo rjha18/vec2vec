@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.nn.utils.spectral_norm as spec
+
 
 def add_residual(input_x: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     if input_x.shape[1] < x.shape[1]:
@@ -9,6 +11,7 @@ def add_residual(input_x: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         input_x = input_x[:, :x.shape[1]]
     return x + input_x
 
+
 class MLPWithResidual(nn.Module):
     def __init__(
             self, 
@@ -17,7 +20,7 @@ class MLPWithResidual(nn.Module):
             hidden_dim: int, 
             out_dim: int,
             norm_style: bool = 'batch',
-            output_norm: bool = True,
+            output_norm: bool = False,
         ):
         super().__init__()
         self.depth = depth
@@ -32,8 +35,6 @@ class MLPWithResidual(nn.Module):
             batch_norm = nn.BatchNorm1d
         elif norm_style == 'layer':
             batch_norm = nn.LayerNorm
-        elif norm_style == 'spectral':
-            spec = nn.utils.spectral_norm
 
 
         for layer_idx in range(self.depth):
@@ -67,7 +68,8 @@ class MLPWithResidual(nn.Module):
                     )
                 )
 
-        self.output_layer = batch_norm(out_dim) if batch_norm is not None and output_norm else nn.Identity()
+        self.output_norm = output_norm
+        self.output_layer = nn.LayerNorm(out_dim, elementwise_affine=True) if output_norm else nn.Identity()
         self.initialize_weights()
     
     def initialize_weights(self):
@@ -83,5 +85,7 @@ class MLPWithResidual(nn.Module):
             x = layer(x)
             x = add_residual(input_x, x)
         
-        x = self.output_layer(x) + x
-        return x
+        if self.output_norm:
+            return self.output_layer(x)
+        else:
+            return x

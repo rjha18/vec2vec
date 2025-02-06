@@ -29,6 +29,7 @@ class TransformTranslator(AbsNTranslator):
         self.use_small_output_adapters = use_small_output_adapters
         self.use_residual_adapters = use_residual_adapters
         self.norm_style = norm_style
+        self.transform = transform
         for flag, dims in encoder_dims.items():
             in_adapter, out_adapter = self._make_adapters(dims)
             self.in_adapters[flag] = in_adapter
@@ -39,14 +40,12 @@ class TransformTranslator(AbsNTranslator):
             else:
                 self.target_vectors[flag] = torch.zeros(d_adapter, requires_grad=False)
         self.use_target_vectors = use_target_vectors
-        self.transform = transform
         self.normalize_embeddings = normalize_embeddings
         self.style = style
 
     def translate_embeddings(
         self, embeddings: torch.Tensor, in_name: str, out_name: str, max_noise_pow: float = 0, min_noise_pow: float = 0
     ) -> torch.Tensor:
-        # print(f'{in_name} -> {out_name}')
         in_adapter = self.in_adapters[in_name]
         noisy_embeddings = self._add_noise(embeddings, max_noise_pow, min_noise_pow)
         target_vector = self.target_vectors[out_name] if self.use_target_vectors else None
@@ -67,9 +66,10 @@ class TransformTranslator(AbsNTranslator):
     def _make_adapters(self, dims):
         assert dims is not None
         if self.use_residual_adapters:
-            print("NOTE: Using residual adapters!")
-            return MLPWithResidual(self.depth, dims, self.d_hidden, self.d_adapter, self.norm_style),\
-                   MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims, self.norm_style, output_norm=False)
+            return (
+                MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style),
+                MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims, self.norm_style)
+            )
         in_adapter = []
         out_adapter = []
         for _ in range(self.depth):

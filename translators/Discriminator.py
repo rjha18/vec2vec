@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.nn.utils.spectral_norm as spec
 from translators.MLPWithResidual import MLPWithResidual
 
 class Discriminator(nn.Module):
@@ -11,11 +12,11 @@ class Discriminator(nn.Module):
         else:
             assert depth >= 1
             layers = []
-            layers.append(nn.Linear(latent_dim, discriminator_dim))
+            layers.append(spec(nn.Linear(latent_dim, discriminator_dim)))
             for _ in range(depth - 1):
-                layers.append(nn.Tanh())
-                layers.append(nn.Linear(discriminator_dim, discriminator_dim))
-            layers.append(nn.Tanh())
+                layers.append(nn.SiLU())
+                layers.append(spec(nn.Linear(discriminator_dim, discriminator_dim)))
+            layers.append(nn.SiLU())
             layers.append(nn.Linear(discriminator_dim, 1))
             self.discriminator = nn.Sequential(*layers)
 

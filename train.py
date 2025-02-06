@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from translators.Discriminator import Discriminator
 
 # from eval import eval_model
-from utils.collate import MultiEncoderCollator
+from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.dist import get_rank, get_world_size
 from utils.eval_utils import EarlyStopper, eval_loop_
 from utils.gan import VanillaGAN, RelativisticGAN
@@ -138,6 +138,11 @@ def main():
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
 
+    # set seeds
+    random.seed(cfg.seed + get_rank())
+    torch.manual_seed(cfg.seed + get_rank())
+    np.random.seed(cfg.seed + get_rank())
+
     use_val_set = hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
@@ -185,6 +190,7 @@ def main():
     print("Number of parameters:", cfg.num_params)
     print("Number of *trainable* parameters:", sum(p.numel() for p in translator.parameters() if p.requires_grad))
     print("Number of training datapoints:", len(dset))
+    print(translator)
 
     logger = Logger(
         project=cfg.wandb_project,
@@ -192,9 +198,6 @@ def main():
         dummy=(cfg.wandb_project is None) or not (cfg.use_wandb),
         config=cfg,
     )
-
-    random.seed(cfg.seed + get_rank())
-    torch.manual_seed(cfg.seed + get_rank())
 
     num_workers = get_num_proc()
     print(f"Rank {get_rank()} using {num_workers} workers and {len(dset)} datapoints")
@@ -222,6 +225,23 @@ def main():
             np.random.shuffle(valmask)
             valset = valset.select(np.where(valmask)[0])
         unsupset = unsupset.select(np.where(unsupmask)[0])
+    
+    supset = MultiencoderTokenizedDataset(
+        dataset=supset,
+        encoders=sup_encs,
+        n_embs_per_batch=cfg.n_embs_per_batch,
+        batch_size=cfg.bs,
+        max_length=cfg.max_seq_length, 
+        seed=cfg.seed,
+    )
+    unsupset = MultiencoderTokenizedDataset(
+        dataset=unsupset,
+        encoders=unsup_enc,
+        n_embs_per_batch=1, 
+        batch_size=cfg.bs,
+        max_length=cfg.max_seq_length, 
+        seed=cfg.seed,
+    )
 
     sup_dataloader = DataLoader(
         supset,
@@ -230,9 +250,7 @@ def main():
         shuffle=True,
         pin_memory=True,
         prefetch_factor=(8 if num_workers > 0 else None),
-        collate_fn=MultiEncoderCollator(
-            sup_encs, cfg.n_embs_per_batch, max_length=cfg.max_seq_length
-        ),
+        collate_fn=TokenizedCollator(),
         drop_last=True,
     )
 
@@ -243,13 +261,19 @@ def main():
         shuffle=True,
         pin_memory=True,
         prefetch_factor=(8 if num_workers > 0 else None),
-        collate_fn=MultiEncoderCollator(
-            unsup_enc, 1, max_length=cfg.max_seq_length
-        ),
+        collate_fn=TokenizedCollator(),
         drop_last=True,
     )
 
     if use_val_set:
+        valset = MultiencoderTokenizedDataset(
+            dataset=valset,
+            encoders={ **unsup_enc, **sup_encs },
+            n_embs_per_batch=2, 
+            batch_size=cfg.val_bs,
+            max_length=cfg.max_seq_length, 
+            seed=cfg.seed,
+        )
         valloader = DataLoader(
             valset,
             batch_size=cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
@@ -257,9 +281,7 @@ def main():
             shuffle=False,
             pin_memory=True,
             prefetch_factor=(8 if num_workers > 0 else None),
-            collate_fn=MultiEncoderCollator(
-                {**sup_encs, **unsup_enc}, len({**sup_encs, **unsup_enc}), max_length=cfg.max_seq_length
-            ),
+            collate_fn=TokenizedCollator(),
             drop_last=True,
         )
         valloader = accelerator.prepare(valloader)
@@ -282,7 +304,16 @@ def main():
                 return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
         scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
     disc_norm = 'spectral' if hasattr(cfg, 'use_spectral') and cfg.use_spectral else None
-    disc = Discriminator(cfg.d_adapter, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=disc_norm)
+    disc = Discriminator(
+        cfg.d_adapter, 
+        cfg.disc_dim, 
+        cfg.disc_depth, 
+        cfg.use_residual, 
+        norm_style=disc_norm
+    )
+    cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
+    print(f"Number of discriminator parameters:", cfg.num_disc_params)
+    print(disc)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
@@ -301,12 +332,26 @@ def main():
         min_delta=cfg.delta if hasattr(cfg, 'delta') else 0
     )
 
+    if cfg.gan_style == "vanilla":
+        gan_cls = VanillaGAN
+    elif cfg.gan_style == "relativistic":
+        gan_cls = RelativisticGAN
+    else:
+        raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
+    gan = gan_cls(
+        cfg=cfg,
+        generator=translator,
+        discriminator=disc,
+        generator_opt=opt,
+        discriminator_opt=disc_opt,
+        accelerator=accelerator
+    )
     for epoch in range(max_num_epochs):
         if use_val_set and get_rank() == 0:
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
-                recons, trans, heatmap = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
+                recons, trans, heatmap_dict = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
                 for flag, res in recons.items():
                     for k, v in res.items():
                         if k == 'cos':
@@ -318,9 +363,9 @@ def main():
                                 continue
                             val_res[f"val/{flag}_{target_flag}_{k}"] = v
 
-                if heatmap is not None:
-                    for k, v in heatmap.items():
-                        if k == 'heatmap':
+                if heatmap_dict is not None:
+                    for k,v in heatmap_dict.items():
+                        if k in ["heatmap", "heatmap_softmax"]:
                             v = wandb.Image(v)
                         val_res[f"val/{k}"] = v
                 wandb.log(val_res)
@@ -332,20 +377,6 @@ def main():
                 #     best_model = translator.state_dict().copy()
                 #     best_disc = disc.state_dict().copy()
 
-        if cfg.gan_style == "vanilla":
-            gan_cls = VanillaGAN
-        elif cfg.gan_style == "relativistic":
-            gan_cls = RelativisticGAN
-        else:
-            raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
-        gan = gan_cls(
-            cfg=cfg,
-            generator=translator,
-            discriminator=disc,
-            generator_opt=opt,
-            discriminator_opt=disc_opt,
-            accelerator=accelerator
-        )
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:
