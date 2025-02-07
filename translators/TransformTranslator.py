@@ -44,12 +44,11 @@ class TransformTranslator(AbsNTranslator):
         self.style = style
 
     def translate_embeddings(
-        self, embeddings: torch.Tensor, in_name: str, out_name: str, max_noise_pow: float = 0, min_noise_pow: float = 0
+        self, embeddings: torch.Tensor, in_name: str, out_name: str,
     ) -> torch.Tensor:
         in_adapter = self.in_adapters[in_name]
-        noisy_embeddings = self._add_noise(embeddings, max_noise_pow, min_noise_pow)
         target_vector = self.target_vectors[out_name] if self.use_target_vectors else None
-        latents = self._get_latents(emb=noisy_embeddings, in_adapter=in_adapter, target_vector=target_vector)
+        latents = self._get_latents(emb=embeddings, in_adapter=in_adapter, target_vector=target_vector)
         return self._out_project(latents,  self.out_adapters[out_name])
 
     def add_encoders(self, encoder_dims: dict[str, int], overwrite_embs: list[str] = None):
@@ -92,8 +91,6 @@ class TransformTranslator(AbsNTranslator):
     def forward(
         self,
         ins: dict[str, torch.Tensor],
-        max_noise_pow: float = 0,
-        min_noise_pow: float = 0,
         in_set: set[str] = None,
         out_set: set[str] = None,
         include_reps: bool = False,
@@ -108,7 +105,7 @@ class TransformTranslator(AbsNTranslator):
         reps = translations.copy() if self.use_target_vectors else recons.copy()
 
         for flag in in_set:
-            noisy_emb = self._add_noise(ins[flag], max_noise_pow, min_noise_pow)
+            noisy_emb = ins[flag]
             if not self.use_target_vectors:
                 noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag])
                 if include_reps:
@@ -128,15 +125,6 @@ class TransformTranslator(AbsNTranslator):
             return recons, translations, reps
         else:
             return recons, translations
-
-    def _add_noise(self, emb, max_noise_pow, min_noise_pow):
-        if self.training and not (max_noise_pow == 0 and min_noise_pow == 0):
-            noise_pow = random.uniform(min_noise_pow, max_noise_pow)
-            noise_level = 10 ** noise_pow
-            noise = torch.randn_like(emb) * noise_level
-        else:
-            noise = torch.zeros_like(emb)
-        return emb + noise
 
     def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module, target_vector: torch.Tensor = None) -> torch.Tensor:
         z = in_adapter(emb)

@@ -28,7 +28,7 @@ from utils.wandb_logger import Logger
 
 
 def training_loop_(
-    save_dir, accelerator, gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
+    save_dir, accelerator, latent_gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -55,18 +55,14 @@ def training_loop_(
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
 
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
-            if cfg.add_noise:
-                min_noise_pow = -10
-                max_noise_pow = -1
-            else:
-                min_noise_pow = 0
-                max_noise_pow = 0
-
-            recons, translations, reps = translator(ins, max_noise_pow, min_noise_pow, include_reps=True)
+            recons, translations, reps = translator(ins, include_reps=True)
 
             real_data = reps[cfg.sup_emb]
             fake_data = reps[cfg.unsup_emb]
 
+            # discriminator
+
+            # latent discriminator
             disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
                 real_data=real_data,
                 fake_data=fake_data
@@ -77,7 +73,7 @@ def training_loop_(
                 for out_flag in translations.keys():
                     in_flag = random.choice(list(translations[out_flag].keys()))
                     cc_ins[out_flag] = translations[out_flag][in_flag].detach()
-                _, cc_translations = translator(cc_ins, max_noise_pow, min_noise_pow)
+                _, cc_translations = translator(cc_ins)
                 # cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
@@ -305,16 +301,24 @@ def main():
                 return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
         scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
     disc_norm = 'spectral' if hasattr(cfg, 'use_spectral') and cfg.use_spectral else None
-    disc = Discriminator(
+    latent_disc = Discriminator(
         cfg.d_adapter, 
         cfg.disc_dim, 
         cfg.disc_depth, 
         cfg.use_residual, 
         norm_style=disc_norm
     )
-    cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
+    disc = Discriminator(
+        768, # TODO: where to get this from? 
+        cfg.disc_dim, 
+        cfg.disc_depth, 
+        cfg.use_residual, 
+        norm_style=disc_norm
+    )
+    cfg.num_disc_params = sum(x.numel() for x in disc.parameters()) + sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
     print(disc)
+    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
@@ -339,6 +343,14 @@ def main():
         gan_cls = RelativisticGAN
     else:
         raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
+    latent_gan = gan_cls(
+        cfg=cfg,
+        generator=translator,
+        discriminator=latent_disc,
+        generator_opt=opt,
+        discriminator_opt=latent_disc_opt,
+        accelerator=accelerator
+    )
     gan = gan_cls(
         cfg=cfg,
         generator=translator,
@@ -390,6 +402,7 @@ def main():
             accelerator=accelerator,
             translator=translator,
             gan=gan,
+            latent_gan=latent_gan,
             sup_dataloader=sup_dataloader,
             unsup_dataloader=unsup_dataloader,
             sup_encs=sup_encs,
