@@ -68,8 +68,10 @@ def eval_batch(ins, recons, translations):
     recon_res = {}
     translation_res = {}
     for target_flag, emb in ins.items():
+        emb = emb / emb.norm(dim=1, keepdim=True)
         in_distances = 1 - (emb @ emb.T)
         rec = recons[target_flag]
+        rec = rec / rec.norm(dim=1, keepdim=True)
         rec_distances = 1 - (rec @ rec.T)
         recon_res[target_flag] = {
             "mse": F.mse_loss(emb, rec).item(),
@@ -79,6 +81,7 @@ def eval_batch(ins, recons, translations):
         }
         translation_res[target_flag] = {}
         for flag, trans in translations[target_flag].items():
+            trans = trans / trans.norm(dim=1, keepdim=True)
             out_distances = 1 - (trans @ trans.T)
             translation_res[target_flag][flag] = {
                 "mse": F.mse_loss(emb, trans).item(),
@@ -148,8 +151,8 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
     
         # plot sims w/ softmax
         fig, ax = plt.subplots(figsize=(6,5))
-        sims_softmax = F.softmax(torch.tensor(sims), dim=1).numpy()
-        sns.heatmap(sims_softmax, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
+        sims_softmax = F.softmax(torch.tensor(sims) * 50, dim=1).numpy()
+        sns.heatmap(sims_softmax, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities (softmaxed)')
         ax.set_xlabel('Fake')
         ax.set_ylabel('Real')
@@ -172,7 +175,7 @@ def eval_loop_(
         for _, batch in enumerate(iter):
             ins = process_batch(cfg, batch, encoders, device)                
             n += cfg.val_bs
-            recons, translations = translator(ins, 0.0, False)
+            recons, translations = translator(ins, include_reps=False)
             
             r_res, t_res = eval_batch(ins, recons, translations)
             merge_dicts(recon_res, r_res)

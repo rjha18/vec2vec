@@ -20,7 +20,6 @@ class MLPWithResidual(nn.Module):
             hidden_dim: int, 
             out_dim: int,
             norm_style: bool = 'batch',
-            output_norm: bool = False,
         ):
         super().__init__()
         self.depth = depth
@@ -67,9 +66,6 @@ class MLPWithResidual(nn.Module):
                         nn.Linear(hidden_dim, out_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, out_dim)),
                     )
                 )
-
-        self.output_norm = output_norm
-        self.output_layer = nn.LayerNorm(out_dim, elementwise_affine=True) if output_norm else nn.Identity()
         self.initialize_weights()
     
     def initialize_weights(self):
@@ -85,7 +81,4 @@ class MLPWithResidual(nn.Module):
             x = layer(x)
             x = add_residual(input_x, x)
         
-        if self.output_norm:
-            return self.output_layer(x)
-        else:
-            return x
+        return x

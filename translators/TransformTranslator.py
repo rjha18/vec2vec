@@ -126,7 +126,8 @@ class TransformTranslator(AbsNTranslator):
 
         if include_reps:
             return recons, translations, reps
-        return recons, translations
+        else:
+            return recons, translations
 
     def _add_noise(self, emb, max_noise_pow, min_noise_pow):
         if self.training and not (max_noise_pow == 0 and min_noise_pow == 0):

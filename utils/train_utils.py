@@ -42,17 +42,42 @@ def trans_loss_fn(ins, translations, logger, prefix=""):
     return (loss / len(ins))
 
 
+def contrastive_loss_fn(ins, translations, logger) -> torch.Tensor:
+# TODO: Think about this + test.
+    loss = None
+    EPS = 1e-10
+    count = 0
+    for out_name in ins.keys():
+        for in_name in translations[out_name].keys():
+            B = ins[out_name].detach()
+            B = B / (B.norm(dim=1, keepdim=True) + EPS)
+            in_sims = B @ B.T
+            A = translations[out_name][in_name]
+            A = A / (A.norm(dim=1, keepdim=True) + EPS)
+            out_sims_reflected = A @ B.T
+            contrastive_loss = torch.nn.functional.cross_entropy(
+                out_sims_reflected * 50,
+                torch.arange(in_sims.shape[0], device=in_sims.device)
+            )
+            if logger is not None:
+                logger.logkv(f"{in_name}_{out_name}_contrastive", contrastive_loss)
+
+            if loss is None:
+                loss = contrastive_loss
+            else:
+                loss += contrastive_loss
+            count += 1
+    return loss / count
+
 def vsp_loss_fn(ins, translations, logger) -> torch.Tensor:
     loss = None
     EPS = 1e-10
     count = 0
     for out_name in ins.keys():
-        if out_name not in translations: continue # skip for unidirectional version
-        B = ins[out_name].detach()
-        B = B / (B.norm(dim=1, keepdim=True) + EPS)
-        in_sims = B @ B.T
         for in_name in translations[out_name].keys():
-            if in_name == out_name: continue # don't learn the identity
+            B = ins[out_name].detach()
+            B = B / (B.norm(dim=1, keepdim=True) + EPS)
+            in_sims = B @ B.T
             A = translations[out_name][in_name]
             A = A / (A.norm(dim=1, keepdim=True) + EPS)
             out_sims = A @ A.T

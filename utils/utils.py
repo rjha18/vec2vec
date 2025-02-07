@@ -47,7 +47,7 @@ def load_n_translator(cfg, encoder_dims):
             in_dim=cfg.d_transform, 
             hidden_dim=cfg.d_transform, 
             out_dim=cfg.d_adapter, 
-            norm_style=cfg.norm_style, output_norm=True
+            norm_style=cfg.norm_style
     )
     elif cfg.style == 'n_ae':
         transform = nn.Sequential(

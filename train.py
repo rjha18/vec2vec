@@ -71,16 +71,17 @@ def training_loop_(
                 real_data=real_data,
                 fake_data=fake_data
             )
-
             rec_loss = rec_loss_fn(ins, recons, logger)
             if cfg.loss_coefficient_cc > 0:
-                cc_keys = list(translations.keys())
-                random.shuffle(cc_keys)
-                cc_translations = dict(
-                    itertools.chain(*[{ k1: v.detach()  for v in translations[k1].values()}.items() for k1 in cc_keys]))
-                cc_recons, cc_translations = translator(cc_translations, max_noise_pow, min_noise_pow)
-                cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
+                cc_ins = {}
+                for out_flag in translations.keys():
+                    in_flag = random.choice(list(translations[out_flag].keys()))
+                    cc_ins[out_flag] = translations[out_flag][in_flag].detach()
+                _, cc_translations = translator(cc_ins, max_noise_pow, min_noise_pow)
+                # cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
+                cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
+                # cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
             else:
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
@@ -91,10 +92,10 @@ def training_loop_(
                 vsp_loss = torch.tensor(0.0)
 
             loss = (
-                  (rec_loss * cfg.loss_coefficient_rec)
+                + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
                 + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
-                + (gen_loss * cfg.loss_coefficient_adv)
+                + (gen_loss * cfg.loss_coefficient_gen)
             )
             exit_on_nan(loss)
             opt.zero_grad()

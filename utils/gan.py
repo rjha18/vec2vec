@@ -62,7 +62,7 @@ class VanillaGAN:
             return torch.tensor(0.0), 0.0, 0.0
 
     def step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
-        if self.cfg.loss_coefficient_adv > 0:
+        if self.cfg.loss_coefficient_gen > 0:
             return self._step_generator(real_data=real_data, fake_data=fake_data)
         else:
             return torch.tensor(0.0), 0.0
