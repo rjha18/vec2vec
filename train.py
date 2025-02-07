@@ -57,15 +57,19 @@ def training_loop_(
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
             recons, translations, reps = translator(ins, include_reps=True)
 
-            real_data = reps[cfg.sup_emb]
+            real_data = 
             fake_data = reps[cfg.unsup_emb]
 
             # discriminator
+            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = latent_gan.step(
+                real_data=ins[cfg.sup_emb],
+                fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
+            )
 
             # latent discriminator
-            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-                real_data=real_data,
-                fake_data=fake_data
+            latent_disc_loss, latent_gen_loss, latent_disc_acc_real, latent_disc_acc_fake, latent_gen_acc = latent_gan.step(
+                real_data=reps[cfg.sup_emb],
+                fake_data=reps[cfg.unsup_emb]
             )
             rec_loss = rec_loss_fn(ins, recons, logger)
             if cfg.loss_coefficient_cc > 0:
@@ -91,7 +95,7 @@ def training_loop_(
                 + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
                 + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
-                + (gen_loss * cfg.loss_coefficient_gen)
+                + ((gen_loss + latent_gen_loss) * cfg.loss_coefficient_gen)
             )
             exit_on_nan(loss)
             opt.zero_grad()
@@ -109,6 +113,7 @@ def training_loop_(
                 "cc_rec_loss": cc_rec_loss.item(),
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),
+                "latent_gen_loss": latent_gen_loss.item(),
                 "loss": loss.item(),
                 "grad_norm": grad_norm.item(),
                 "learning_rate": opt.param_groups[0]["lr"],
