@@ -28,7 +28,7 @@ from utils.wandb_logger import Logger
 
 
 def training_loop_(
-    save_dir, accelerator, latent_gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
+    save_dir, accelerator, gan, latent_gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -57,11 +57,8 @@ def training_loop_(
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
             recons, translations, reps = translator(ins, include_reps=True)
 
-            real_data = 
-            fake_data = reps[cfg.unsup_emb]
-
             # discriminator
-            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = latent_gan.step(
+            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
                 real_data=ins[cfg.sup_emb],
                 fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
             )
@@ -331,8 +328,8 @@ def main():
         translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
         disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
 
-    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt = accelerator.prepare(
-        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt
+    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, latent_disc, disc_opt, latent_disc_opt = accelerator.prepare(
+        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, latent_disc, disc_opt, latent_disc_opt
     )
 
     best_model = None
