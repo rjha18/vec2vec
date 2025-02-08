@@ -177,8 +177,12 @@ def main():
     assert hasattr(cfg, 'unsup_emb')
     assert cfg.sup_emb != cfg.unsup_emb
 
-    unsup_enc = {cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)}
-    unsup_dim = {cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])}
+    unsup_enc = {
+        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)
+    }
+    unsup_dim = {
+        cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
+    }
     translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
 
     assert cfg.unsup_emb not in sup_encs
@@ -205,25 +209,11 @@ def main():
         dset = dset.select(range(max_num_datapoints))
         print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
 
-    mask = np.full(len(dset), False)
     if hasattr(cfg, 'num_points'):
-        mask[:cfg.num_points] = True
-        np.random.seed(cfg.seed + get_rank())
-        np.random.shuffle(mask)
-        supset = dset.select(np.where(mask)[0])
-        unsupset = dset.select(np.where(~mask)[0])
-        unsupmask = np.full(len(unsupset), False)
-        unsupmask[:cfg.num_points] = True
-        np.random.seed(cfg.seed + get_rank())
-        np.random.shuffle(unsupmask)
+        supset = dset.shuffle(seed=cfg.seed).select(range(cfg.num_points))
+        unsupset = dset.shuffle(seed=cfg.seed + 1).select(range(cfg.num_points))
         if use_val_set:
-            valset = unsupset.select(np.where(~unsupmask)[0])
-            valmask = np.full(len(valset), False)
-            valmask[:cfg.val_size] = True
-            np.random.seed(cfg.seed + get_rank())
-            np.random.shuffle(valmask)
-            valset = valset.select(np.where(valmask)[0])
-        unsupset = unsupset.select(np.where(unsupmask)[0])
+            valset = dset.shuffle(seed=cfg.seed + 2).select(range(cfg.val_size))
     
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
@@ -252,7 +242,6 @@ def main():
         collate_fn=TokenizedCollator(),
         drop_last=True,
     )
-
     unsup_dataloader = DataLoader(
         unsupset,
         batch_size=cfg.bs,
