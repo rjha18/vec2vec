@@ -209,11 +209,12 @@ def main():
         dset = dset.select(range(max_num_datapoints))
         print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
 
+    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.seed)
+    dset = dset_dict["train"]
+    valset = dset_dict["test"]
     if hasattr(cfg, 'num_points'):
-        supset = dset.shuffle(seed=cfg.seed).select(range(cfg.num_points))
-        unsupset = dset.shuffle(seed=cfg.seed + 1).select(range(cfg.num_points))
-        if use_val_set:
-            valset = dset.shuffle(seed=cfg.seed + 2).select(range(cfg.val_size))
+        supset = dset.shuffle(seed=cfg.seed + 1).select(range(cfg.num_points))
+        unsupset = dset.shuffle(seed=cfg.seed + 2).select(range(cfg.num_points))
     
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
@@ -291,20 +292,15 @@ def main():
             else:
                 return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
         scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
-    disc_norm = 'spectral' if hasattr(cfg, 'use_spectral') and cfg.use_spectral else None
     latent_disc = Discriminator(
-        cfg.d_adapter, 
-        cfg.disc_dim, 
-        cfg.disc_depth, 
-        cfg.use_residual, 
-        norm_style=disc_norm
+        latent_dim=cfg.d_adapter, 
+        discriminator_dim=cfg.disc_dim, 
+        depth=cfg.disc_depth, 
     )
     disc = Discriminator(
-        768, # TODO: where to get this from? 
-        cfg.disc_dim, 
-        cfg.disc_depth, 
-        cfg.use_residual, 
-        norm_style=disc_norm
+        latent_dim=768, # TODO: where to get this from? 
+        discriminator_dim=cfg.disc_dim, 
+        depth=cfg.disc_depth, 
     )
     cfg.num_disc_params = sum(x.numel() for x in disc.parameters()) + sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)

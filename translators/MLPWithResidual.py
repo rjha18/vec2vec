@@ -28,12 +28,12 @@ class MLPWithResidual(nn.Module):
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
 
-        assert norm_style in ['batch', 'layer', 'spectral', None]
-        batch_norm = None
         if norm_style == 'batch':
-            batch_norm = nn.BatchNorm1d
+            norm_layer = nn.BatchNorm1d
         elif norm_style == 'layer':
-            batch_norm = nn.LayerNorm
+            norm_layer = nn.LayerNorm
+        else:
+            raise ValueError(f"Unknown norm style: {norm_style}")
 
 
         for layer_idx in range(self.depth):
@@ -42,28 +42,28 @@ class MLPWithResidual(nn.Module):
                 hidden_dim = out_dim if self.depth == 1 else hidden_dim
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(in_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(in_dim, hidden_dim)),
+                        spec(nn.Linear(in_dim, hidden_dim)),
                         nn.SiLU(),
-                        nn.Dropout(p=0.01),
-                        batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
+                        norm_layer(hidden_dim),
+                        nn.Dropout(p=0.2),
                     )
                 )
             elif layer_idx < self.depth - 1:
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(hidden_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, hidden_dim)),
+                        spec(nn.Linear(hidden_dim, hidden_dim)),
                         nn.SiLU(),
-                        nn.Dropout(p=0.01),
-                        batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
+                        norm_layer(hidden_dim),
+                        nn.Dropout(p=0.2),
                     )
                 )
             else:
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(hidden_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, hidden_dim)),
-                        nn.Dropout(p=0.01),
+                        spec(nn.Linear(hidden_dim, hidden_dim)),
+                        nn.Dropout(p=0.2),
                         nn.SiLU(),
-                        nn.Linear(hidden_dim, out_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, out_dim)),
+                        spec(nn.Linear(hidden_dim, out_dim)),
                     )
                 )
         self.initialize_weights()
