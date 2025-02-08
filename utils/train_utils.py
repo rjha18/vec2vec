@@ -18,6 +18,29 @@ def rec_loss_fn(ins, recons, logger, prefix=""):
     return loss / len(ins)
 
 
+def rec_margin_loss_fn(ins, recons, logger, prefix="", margin: float = 0.1):
+    """Penalizes embeddings from being more than `margin` similarity away from at least
+    one embedding."""
+    assert ins.keys() == recons.keys()
+    loss = None
+    for flag, emb in ins.items():
+        A = emb / emb.norm(dim=1, keepdim=True)
+        B = recons[flag] / recons[flag].norm(dim=1, keepdim=True)
+        
+        sims = A @ B.T
+        max_sims = sims.max(dim=1).values
+        max_distances = 1 - max_sims
+        margin_loss = (max_distances - margin).clamp(min=0).mean()
+
+        recons_loss_cos = 1 - F.cosine_similarity(A, B, dim=1).mean()
+        logger.logkv(f"{prefix}{flag}_recons_rmse", rmse(emb, recons[flag]))
+        logger.logkv(f"{prefix}{flag}_recons_cos", recons_loss_cos)
+        if loss is None:
+            loss = margin_loss
+        else:
+            loss += margin_loss
+    return loss / len(ins)
+
 def uni_loss_fn(emb, trans, src_emb, tgt_emb, logger):
     uni_loss = 1 - F.cosine_similarity(emb, trans, dim=1).mean()
     logger.logkv(f"{src_emb}_{tgt_emb}_uni_rmse", rmse(emb, trans))

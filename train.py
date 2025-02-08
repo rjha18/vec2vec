@@ -23,7 +23,7 @@ from utils.gan import VanillaGAN, RelativisticGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings, process_batch
-from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
+from utils.train_utils import rec_loss_fn, rec_margin_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.wandb_logger import Logger
 
 
@@ -73,14 +73,12 @@ def training_loop_(
                 cc_ins = {}
                 for out_flag in translations.keys():
                     in_flag = random.choice(list(translations[out_flag].keys()))
-                    cc_ins[out_flag] = translations[out_flag][in_flag].detach()
-                _, cc_translations = translator(cc_ins)
-                # cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
-                cc_rec_loss = torch.tensor(0.0)
+                    cc_ins[out_flag] = translations[out_flag][in_flag] # .detach()
+                cc_recons, cc_translations = translator(cc_ins)
+                cc_rec_margin_loss = rec_margin_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
-                # cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
             else:
-                cc_rec_loss = torch.tensor(0.0)
+                cc_rec_margin_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
 
             if cfg.loss_coefficient_vsp > 0:
@@ -91,7 +89,7 @@ def training_loop_(
             loss = (
                 + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
-                + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
+                + ((cc_rec_margin_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
                 + ((gen_loss + latent_gen_loss) * cfg.loss_coefficient_gen)
             )
             exit_on_nan(loss)
@@ -105,9 +103,10 @@ def training_loop_(
 
             metrics = {
                 "disc_loss": disc_loss.item(),
+                "latent_disc_loss": latent_disc_loss.item(),
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
-                "cc_rec_loss": cc_rec_loss.item(),
+                "cc_rec_margin_loss": cc_rec_margin_loss.item(),
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),
                 "latent_gen_loss": latent_gen_loss.item(),
