@@ -138,6 +138,9 @@ def main():
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
 
+    random.seed(cfg.seed + get_rank())
+    torch.manual_seed(cfg.seed + get_rank())
+
     use_val_set = hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
@@ -192,9 +195,6 @@ def main():
         dummy=(cfg.wandb_project is None) or not (cfg.use_wandb),
         config=cfg,
     )
-
-    random.seed(cfg.seed + get_rank())
-    torch.manual_seed(cfg.seed + get_rank())
 
     num_workers = get_num_proc()
     print(f"Rank {get_rank()} using {num_workers} workers and {len(dset)} datapoints")
