@@ -53,7 +53,7 @@ class Logger:
             )
         else:
             print("Wandb is disabled")
-            wandb.init(dryrun=True)
+            wandb.init(mode="disabled")
         self.log_frequency = 250
         self.log_step = 0
 

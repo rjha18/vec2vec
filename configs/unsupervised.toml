@@ -38,7 +38,6 @@ overwrite = false
 freeze_params = false
 patience = 25
 delta = 0.0
-use_target_vectors = false
 use_small_output_adapters = false
 use_residual_adapters = true
 no_scheduler = true

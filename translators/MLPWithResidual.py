@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.utils.spectral_norm as spec
+import torch.nn.utils.spectral_norm as spectral_norm
 
 
 def add_residual(input_x: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
@@ -20,6 +20,7 @@ class MLPWithResidual(nn.Module):
             hidden_dim: int, 
             out_dim: int,
             norm_style: bool = 'batch',
+            use_spectral_norm: bool = True,
         ):
         super().__init__()
         self.depth = depth
@@ -27,6 +28,8 @@ class MLPWithResidual(nn.Module):
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
+
+        spec = spectral_norm if use_spectral_norm else lambda x: x
 
         if norm_style == 'batch':
             norm_layer = nn.BatchNorm1d
@@ -45,7 +48,7 @@ class MLPWithResidual(nn.Module):
                         spec(nn.Linear(in_dim, hidden_dim)),
                         nn.SiLU(),
                         norm_layer(hidden_dim),
-                        nn.Dropout(p=0.2),
+                        nn.Dropout(p=0.05),
                     )
                 )
             elif layer_idx < self.depth - 1:
@@ -54,14 +57,14 @@ class MLPWithResidual(nn.Module):
                         spec(nn.Linear(hidden_dim, hidden_dim)),
                         nn.SiLU(),
                         norm_layer(hidden_dim),
-                        nn.Dropout(p=0.2),
+                        nn.Dropout(p=0.05),
                     )
                 )
             else:
                 self.layers.append(
                     nn.Sequential(
                         spec(nn.Linear(hidden_dim, hidden_dim)),
-                        nn.Dropout(p=0.2),
+                        nn.Dropout(p=0.05),
                         nn.SiLU(),
                         spec(nn.Linear(hidden_dim, out_dim)),
                     )

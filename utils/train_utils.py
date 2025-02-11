@@ -24,15 +24,12 @@ def rec_margin_loss_fn(ins, recons, logger, prefix="", margin: float = 0.1):
     assert ins.keys() == recons.keys()
     loss = None
     for flag, emb in ins.items():
-        A = emb / emb.norm(dim=1, keepdim=True)
-        B = recons[flag] / recons[flag].norm(dim=1, keepdim=True)
-        
-        sims = A @ B.T
-        max_sims = sims.max(dim=1).values
-        max_distances = 1 - max_sims
-        margin_loss = (max_distances - margin).clamp(min=0).mean()
+        A = emb / emb.norm(dim=1, p=2, keepdim=True)
+        B = recons[flag] / recons[flag].norm(dim=1, p=2, keepdim=True).mean(dim=1, keepdim=True)
 
-        recons_loss_cos = 1 - F.cosine_similarity(A, B, dim=1).mean()
+        cos_distances = 1 - F.cosine_similarity(A, B, dim=1)
+        recons_loss_cos = cos_distances.mean()
+        margin_loss = (cos_distances - margin).clamp(min=0).mean()
         logger.logkv(f"{prefix}{flag}_recons_rmse", rmse(emb, recons[flag]))
         logger.logkv(f"{prefix}{flag}_recons_cos", recons_loss_cos)
         if loss is None:
@@ -104,10 +101,10 @@ def vsp_loss_fn(ins, translations, logger) -> torch.Tensor:
             A = translations[out_name][in_name]
             A = A / (A.norm(dim=1, keepdim=True) + EPS)
             out_sims = A @ A.T
-            out_sims_reflected = A @ B.T
+            # out_sims_reflected = A @ B.T
             vsp_loss = (
                   (in_sims - out_sims).abs().mean()
-                + (in_sims - out_sims_reflected).abs().mean()
+                # + (in_sims - out_sims_reflected).abs().mean()
             )
             if logger is not None:
                 logger.logkv(f"{in_name}_{out_name}_vsp", vsp_loss)

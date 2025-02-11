@@ -11,7 +11,6 @@ class VanillaGAN:
     cfg: types.SimpleNamespace
     generator: torch.nn.Module
     discriminator: torch.nn.Module
-    generator_opt: torch.optim.Optimizer
     discriminator_opt: torch.optim.Optimizer
     accelerator: accelerate.Accelerator
 
@@ -33,6 +32,7 @@ class VanillaGAN:
         disc_loss = (disc_loss_real + disc_loss_fake) / 2
         disc_acc_real = (d_real_logits.sigmoid() < 0.5).float().mean().item()
         disc_acc_fake = (d_fake_logits.sigmoid() > 0.5).float().mean().item()
+
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(

@@ -333,7 +333,6 @@ def main():
         cfg=cfg,
         generator=translator,
         discriminator=latent_disc,
-        generator_opt=opt,
         discriminator_opt=latent_disc_opt,
         accelerator=accelerator
     )
@@ -341,7 +340,6 @@ def main():
         cfg=cfg,
         generator=translator,
         discriminator=disc,
-        generator_opt=opt,
         discriminator_opt=disc_opt,
         accelerator=accelerator
     )
