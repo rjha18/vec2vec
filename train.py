@@ -72,11 +72,9 @@ def training_loop_(
                     itertools.chain(*[{
                         k1: v.detach() if hasattr(cfg, 'cc_detach') and cfg.cc_detach else v for v in translations[k1].values()
                     }.items() for k1 in cc_keys]))
-                cc_recons, cc_translations, cc_reps = translator(cc_translations, max_noise_pow, min_noise_pow, include_reps=True)
-                cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
+                _, cc_translations, cc_reps = translator(cc_translations, max_noise_pow, min_noise_pow, include_reps=True)
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
             else:
-                cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
 
             if cfg.loss_coefficient_vsp > 0:
@@ -102,7 +100,7 @@ def training_loop_(
             loss = (
                   (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
-                + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
+                + (cc_trans_loss * cfg.loss_coefficient_cc)
                 + (gen_loss * cfg.loss_coefficient_adv)
             )
             exit_on_nan(loss)
@@ -118,7 +116,6 @@ def training_loop_(
                 "disc_loss": disc_loss.item(),
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
-                "cc_rec_loss": cc_rec_loss.item(),
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),
                 "loss": loss.item(),
