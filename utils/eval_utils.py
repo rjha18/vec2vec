@@ -131,11 +131,12 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
     ins_norm = F.normalize(ins[sup_emb].cpu(), p=2, dim=1)
     trans_norm = F.normalize(trans.cpu(), p=2, dim=1)
     sims = (ins_norm @ trans_norm.T).numpy()
-    res['top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
-    res[f'top_{k}_acc'] = top_k_accuracy(sims, k)
+    sims_softmax = F.softmax(torch.tensor(sims) * 50, dim=1).numpy()
+    res['top_1_acc'] = (sims_softmax.argmax(axis=1) == np.arange(sims_softmax.shape[0])).mean()
+    res[f'top_{k}_acc'] = top_k_accuracy(sims_softmax, k)
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
-        res['heatmap_top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
+        res['heatmap_top_1_acc'] = top_k_accuracy(sims, 1)
         if heatmap_size > k:
             res[f'heatmap_top_{k}_acc'] = top_k_accuracy(sims, k)
 
@@ -151,7 +152,6 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
     
         # plot sims w/ softmax
         fig, ax = plt.subplots(figsize=(6,5))
-        sims_softmax = F.softmax(torch.tensor(sims) * 50, dim=1).numpy()
         sns.heatmap(sims_softmax, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities (softmaxed)')
         ax.set_xlabel('Fake')

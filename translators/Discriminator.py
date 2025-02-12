@@ -10,12 +10,15 @@ class Discriminator(nn.Module):
 
         assert depth >= 1, "Depth must be at least 1"
         layers = []
-        layers.append(spec(nn.Linear(latent_dim, discriminator_dim)))
-        for _ in range(depth - 1):
+        if depth >= 2:
+            layers.append(spec(nn.Linear(latent_dim, discriminator_dim)))
+            for _ in range(depth - 2):
+                layers.append(nn.SiLU())
+                layers.append(spec(nn.Linear(discriminator_dim, discriminator_dim)))
             layers.append(nn.SiLU())
-            layers.append(spec(nn.Linear(discriminator_dim, discriminator_dim)))
-        layers.append(nn.SiLU())
-        layers.append(spec(nn.Linear(discriminator_dim, 1)))
+            layers.append(spec(nn.Linear(discriminator_dim, 1)))
+        else:
+            layers.append(spec(nn.Linear(latent_dim, 1)))
         self.discriminator = nn.Sequential(*layers)
         self.initialize_weights()
     
@@ -27,4 +30,6 @@ class Discriminator(nn.Module):
                     torch.nn.init.zeros_(module.bias)
 
     def forward(self, x):
-        return self.discriminator(x)
+        output = self.discriminator(x)
+        # breakpoint()
+        return output

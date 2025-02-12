@@ -23,7 +23,7 @@ from utils.gan import VanillaGAN, RelativisticGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings, process_batch
-from utils.train_utils import rec_loss_fn, rec_margin_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
+from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.wandb_logger import Logger
 
 
@@ -47,6 +47,7 @@ def training_loop_(
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
 
+    translator.train()
     for i, (sup_batch, unsup_batch) in enumerate(dataloader_pbar):
         if max_num_batches is not None and i >= max_num_batches:
             print(f"Early stopping at {i} batches")
@@ -58,9 +59,14 @@ def training_loop_(
             recons, translations, reps = translator(ins, include_reps=True)
 
             # discriminator
-            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-                real_data=ins[cfg.sup_emb],
-                fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
+            # disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
+            #     real_data=ins[cfg.sup_emb],
+            #     fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
+            # )
+            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = (
+                torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), 
+                torch.tensor(0.0, device=device), torch.tensor(0.0, device=device),
+                torch.tensor(0.0, device=device)
             )
 
             # latent discriminator
@@ -69,13 +75,13 @@ def training_loop_(
                 fake_data=reps[cfg.unsup_emb]
             )
             rec_loss = rec_loss_fn(ins, recons, logger)
-            if cfg.loss_coefficient_cc > 0:
+            if (cfg.loss_coefficient_cc_rec > 0) or (cfg.loss_coefficient_cc_trans > 0):
                 cc_ins = {}
                 for out_flag in translations.keys():
                     in_flag = random.choice(list(translations[out_flag].keys()))
-                    cc_ins[out_flag] = translations[out_flag][in_flag] # .detach()
+                    cc_ins[out_flag] = translations[out_flag][in_flag].detach()
                 cc_recons, cc_translations = translator(cc_ins)
-                cc_rec_margin_loss = rec_margin_loss_fn(ins, cc_recons, logger, prefix="cc_")
+                cc_rec_margin_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
             else:
                 cc_rec_margin_loss = torch.tensor(0.0)
@@ -89,14 +95,17 @@ def training_loop_(
             loss = (
                 + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
-                + ((cc_rec_margin_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
+                + (cc_rec_margin_loss * cfg.loss_coefficient_cc_rec)
+                + (cc_trans_loss * cfg.loss_coefficient_cc_trans)
                 + ((gen_loss + latent_gen_loss) * cfg.loss_coefficient_gen)
             )
             exit_on_nan(loss)
             opt.zero_grad()
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
-            grad_norm = get_grad_norm(translator)
+            grad_norm_generator = get_grad_norm(translator)
+            grad_norm_discriminator = get_grad_norm(gan.discriminator)
+            grad_norm_latent_discriminator = get_grad_norm(latent_gan.discriminator)
 
             opt.step()
             scheduler.step()
@@ -111,10 +120,14 @@ def training_loop_(
                 "gen_loss": gen_loss.item(),
                 "latent_gen_loss": latent_gen_loss.item(),
                 "loss": loss.item(),
-                "grad_norm": grad_norm.item(),
+                "grad_norm_generator": grad_norm_generator,
+                "grad_norm_discriminator": grad_norm_discriminator,
+                "grad_norm_latent_discriminator": grad_norm_latent_discriminator,
                 "learning_rate": opt.param_groups[0]["lr"],
                 "disc_acc_real": disc_acc_real,
                 "disc_acc_fake": disc_acc_fake,
+                "latent_disc_acc_real": latent_disc_acc_real,
+                "latent_disc_acc_fake": latent_disc_acc_fake,
                 "gen_acc": gen_acc,
             }
 
@@ -305,6 +318,9 @@ def main():
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
     print(disc)
     latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
+    print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
+    print(latent_disc)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
@@ -366,13 +382,7 @@ def main():
                             v = wandb.Image(v)
                         val_res[f"val/{k}"] = v
                 wandb.log(val_res)
-
-                # if early_stopper.early_stop(val_res['stop_cond']):
-                #     print("Stopping early! Saving previous model...")
-                #     break
-                # else:
-                #     best_model = translator.state_dict().copy()
-                #     best_disc = disc.state_dict().copy()
+                translator.train()
 
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
@@ -380,7 +390,6 @@ def main():
             max_num_batches = max(1, (cfg.epochs - epoch) * len(supset) // cfg.bs // get_world_size())
             print(f"Setting max_num_batches to {max_num_batches}")
 
-        translator.train()
         training_loop_(
             save_dir=save_dir,
             accelerator=accelerator,

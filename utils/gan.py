@@ -19,8 +19,6 @@ class VanillaGAN:
         return self.cfg.bs
 
     def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float, float]:
-        self.generator.eval()
-
         d_real_logits, d_fake_logits = self.discriminator(real_data), self.discriminator(fake_data)
 
         device = d_real_logits.device
@@ -42,17 +40,15 @@ class VanillaGAN:
             self.cfg.max_grad_norm
         )
         self.discriminator_opt.step()
-        return disc_loss, disc_acc_real, disc_acc_fake
+        return disc_loss.detach(), disc_acc_real, disc_acc_fake
 
     def _step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
-        self.discriminator.eval()
         d_fake_logits = self.discriminator(fake_data)
         device = fake_data.device
         batch_size = fake_data.size(0)
         real_labels = torch.zeros((batch_size, 1), device=device)
         gen_loss = F.binary_cross_entropy_with_logits(d_fake_logits, real_labels)
         gen_acc = (d_fake_logits.sigmoid() < 0.5).float().mean().item()
-        self.discriminator.train()
         return gen_loss, gen_acc
 
     def step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float, float]:
@@ -69,10 +65,14 @@ class VanillaGAN:
 
     def step(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[
             torch.Tensor, torch.Tensor, float, float, float]:
+        self.generator.eval()
+        self.discriminator.train()
         disc_loss, disc_acc_real, disc_acc_fake = self.step_discriminator(
             real_data=real_data.detach(),
             fake_data=fake_data.detach()
         )
+        self.generator.train()
+        self.discriminator.eval()
         gen_loss, gen_acc = self.step_generator(
             real_data=real_data,
             fake_data=fake_data

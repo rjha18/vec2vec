@@ -44,7 +44,7 @@ def load_n_translator(cfg, encoder_dims):
     elif cfg.style == 'res_mlp':
         transform = MLPWithResidual(
             depth=cfg.transform_depth,
-            in_dim=cfg.d_transform, 
+            in_dim=cfg.d_adapter, 
             hidden_dim=cfg.d_transform, 
             out_dim=cfg.d_adapter, 
             norm_style=cfg.norm_style

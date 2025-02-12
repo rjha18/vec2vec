@@ -54,30 +54,23 @@ class TransformTranslator(AbsNTranslator):
     def _make_adapters(self, dims):
         assert dims is not None
         if self.use_residual_adapters:
+            print("Using residual adapters!")
             return (
                 MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style),
-                MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims, self.norm_style)
+                MLPWithResidual(self.depth, self.transform.out_dim, self.d_hidden, dims, self.norm_style)
             )
-        in_adapter = []
-        out_adapter = []
-        for _ in range(self.depth):
-            ################################################################
-            in_adapter.append(nn.Tanh())
-            in_adapter.append(nn.Linear(self.d_adapter, self.d_adapter))
-            in_adapter.append(nn.BatchNorm1d(self.d_adapter))
-            ################################################################
-            out_adapter.append(nn.Tanh())
-            out_adapter.append(nn.Linear(self.d_adapter, self.d_adapter))
-            ################################################################
-        in_adapter = [nn.Linear(dims, self.d_adapter)] + in_adapter
+        assert False # TODO: Remove this option
+        return None
 
-        if self.use_small_output_adapters: # backwards compatibility
-            print("NOTE: Using old output adapter code for finetuning!")
-            out_adapter = out_adapter[:-1]
-        else:
-            out_adapter.reverse()
-        out_adapter = out_adapter + [nn.Linear(self.d_adapter, dims)]
-        return nn.Sequential(*in_adapter), nn.Sequential(*out_adapter)
+    def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module) -> torch.Tensor:
+        z = in_adapter(emb)
+        return self.transform(z)
+
+    def _out_project(self, emb: torch.Tensor, out_adapter: nn.Module) -> torch.Tensor:
+        out = out_adapter(emb)
+        if self.normalize_embeddings:
+            out = out / out.norm(dim=1, keepdim=True)
+        return out
 
     def forward(
         self,
@@ -102,7 +95,7 @@ class TransformTranslator(AbsNTranslator):
                 reps[flag] = noisy_rep
             for target_flag in out_set:
                 if target_flag == flag:
-                    recons[flag] = self._out_project(noisy_rep, self.out_adapters[flag])
+                    recons[flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
                 else:
                     translations[target_flag][flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
 
@@ -110,13 +103,3 @@ class TransformTranslator(AbsNTranslator):
             return recons, translations, reps
         else:
             return recons, translations
-
-    def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module) -> torch.Tensor:
-        z = in_adapter(emb)
-        return self.transform(z)
-
-    def _out_project(self, emb: torch.Tensor, out_adapter: nn.Module) -> torch.Tensor:
-        out = out_adapter(emb)
-        if self.normalize_embeddings:
-            out = out / out.norm(dim=1, keepdim=True)
-        return out
