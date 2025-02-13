@@ -20,7 +20,7 @@ class MLPWithResidual(nn.Module):
             hidden_dim: int, 
             out_dim: int,
             norm_style: bool = 'batch',
-            use_spectral_norm: bool = True,
+            use_spectral_norm: bool = False,
             output_norm: bool = False,
         ):
         super().__init__()
@@ -76,11 +76,15 @@ class MLPWithResidual(nn.Module):
             self.output_norm = None
     
     def initialize_weights(self):
+        # for module in self.modules():
+        #     if isinstance(module, nn.Linear):
+        #         torch.nn.init.normal_(module.weight, std=0.02)
+        #         if module.bias is not None:
+        #             torch.nn.init.zeros_(module.bias)
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
+                torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                module.bias.data.fill_(0)
          
     def forward(self, x):
         for layer in self.layers:

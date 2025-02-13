@@ -75,6 +75,9 @@ def training_loop_(
                 fake_data=reps[cfg.unsup_emb]
             )
             rec_loss = rec_loss_fn(ins, recons, logger)
+
+            recons_as_translations = { in_name: { in_name: val } for in_name, val in recons.items() }
+            vsp_loss = vsp_loss_fn(ins, recons_as_translations, logger)
             if (cfg.loss_coefficient_cc_rec > 0) or (cfg.loss_coefficient_cc_trans > 0):
                 cc_ins = {}
                 for out_flag in translations.keys():
@@ -88,13 +91,14 @@ def training_loop_(
                 cc_trans_loss = torch.tensor(0.0)
 
             if cfg.loss_coefficient_vsp > 0:
-                vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
+                cc_vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
             else:
-                vsp_loss = torch.tensor(0.0)
+                cc_vsp_loss = torch.tensor(0.0)
 
             loss = (
                 + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
+                + (cc_vsp_loss * cfg.loss_coefficient_vsp)
                 + (cc_rec_margin_loss * cfg.loss_coefficient_cc_rec)
                 + (cc_trans_loss * cfg.loss_coefficient_cc_trans)
                 + ((gen_loss + latent_gen_loss) * cfg.loss_coefficient_gen)

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.utils.spectral_norm as spec
 from translators.MLPWithResidual import MLPWithResidual
 
+
 class Discriminator(nn.Module):
     def __init__(self, latent_dim, discriminator_dim=1024, depth=3):
         super(Discriminator, self).__init__()
@@ -23,11 +24,15 @@ class Discriminator(nn.Module):
         self.initialize_weights()
     
     def initialize_weights(self):
+        # for module in self.modules():
+        #     if isinstance(module, nn.Linear):
+        #         torch.nn.init.normal_(module.weight, std=0.02)
+        #         if module.bias is not None:
+        #             torch.nn.init.zeros_(module.bias)
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
+                torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                module.bias.data.fill_(0)
 
     def forward(self, x):
         output = self.discriminator(x)
