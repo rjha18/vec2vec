@@ -124,6 +124,11 @@ def top_k_accuracy(sims, k=1):
     return np.mean(np.any(top_k_preds == correct, axis=1))  # Check if correct label is in top-k
 
 
+def get_rank(sims: np.ndarray) -> float:
+    ranks = (sims.argsort(1) == np.arange(sims.shape[0])).argmax(1)
+    return ranks.mean() + 1
+
+
 def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16) -> dict:
     res = {}
     ins = {k: v[:top_k_size] for k, v in ins.items()}
@@ -134,6 +139,7 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
     sims_softmax = F.softmax(torch.tensor(sims) * 50, dim=1).numpy()
     res['top_1_acc'] = (sims_softmax.argmax(axis=1) == np.arange(sims_softmax.shape[0])).mean()
     res[f'top_{k}_acc'] = top_k_accuracy(sims_softmax, k)
+    res["top_rank"] = get_rank(sims_softmax)
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
         res['heatmap_top_1_acc'] = top_k_accuracy(sims, 1)
@@ -154,8 +160,8 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
         fig, ax = plt.subplots(figsize=(6,5))
         sns.heatmap(sims_softmax, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities (softmaxed)')
-        ax.set_xlabel('Fake')
-        ax.set_ylabel('Real')
+        ax.set_xlabel(f'Fake ({unsup_emb}->{sup_emb})')
+        ax.set_ylabel(f'Real ({sup_emb})')
         plt.tight_layout()
         res['heatmap_softmax'] = fig 
         plt.close(fig)

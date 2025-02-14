@@ -82,24 +82,21 @@ def training_loop_(
                 cc_ins = {}
                 for out_flag in translations.keys():
                     in_flag = random.choice(list(translations[out_flag].keys()))
-                    cc_ins[out_flag] = translations[out_flag][in_flag].detach()
+                    cc_ins[out_flag] = translations[out_flag][in_flag] # .detach()
                 cc_recons, cc_translations = translator(cc_ins)
-                cc_rec_margin_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
+                cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
-            else:
-                cc_rec_margin_loss = torch.tensor(0.0)
-                cc_trans_loss = torch.tensor(0.0)
-
-            if cfg.loss_coefficient_vsp > 0:
                 cc_vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
             else:
+                cc_rec_loss = torch.tensor(0.0)
+                cc_trans_loss = torch.tensor(0.0)
                 cc_vsp_loss = torch.tensor(0.0)
 
             loss = (
                 + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
                 + (cc_vsp_loss * cfg.loss_coefficient_cc_vsp)
-                + (cc_rec_margin_loss * cfg.loss_coefficient_cc_rec)
+                + (cc_rec_loss * cfg.loss_coefficient_cc_rec)
                 + (cc_trans_loss * cfg.loss_coefficient_cc_trans)
                 + (gen_loss * cfg.loss_coefficient_gen)
                 + (latent_gen_loss * cfg.loss_coefficient_latent_gen)
@@ -121,7 +118,7 @@ def training_loop_(
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
                 "cc_vsp_loss": cc_vsp_loss.item(),
-                "cc_rec_margin_loss": cc_rec_margin_loss.item(),
+                "cc_rec_loss": cc_rec_loss.item(),
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),
                 "latent_gen_loss": latent_gen_loss.item(),
@@ -159,6 +156,7 @@ def main():
     random.seed(cfg.seed + get_rank())
     torch.manual_seed(cfg.seed + get_rank())
     np.random.seed(cfg.seed + get_rank())
+    torch.cuda.manual_seed(cfg.seed + get_rank())
 
     use_val_set = hasattr(cfg, 'val_size')
 
@@ -308,7 +306,7 @@ def main():
             if step < warmup_length:
                 return min(1, step / warmup_length)
             else:
-                return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
+                return 1
         scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
     latent_disc = Discriminator(
         latent_dim=cfg.d_adapter, 
