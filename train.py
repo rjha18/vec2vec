@@ -59,15 +59,15 @@ def training_loop_(
             recons, translations, reps = translator(ins, include_reps=True)
 
             # discriminator
-            # disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-            #     real_data=ins[cfg.sup_emb],
-            #     fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
-            # )
-            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = (
-                torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), 
-                torch.tensor(0.0, device=device), torch.tensor(0.0, device=device),
-                torch.tensor(0.0, device=device)
+            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
+                real_data=ins[cfg.sup_emb],
+                fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
             )
+            # disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = (
+            #     torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), 
+            #     torch.tensor(0.0, device=device), torch.tensor(0.0, device=device),
+            #     torch.tensor(0.0, device=device)
+            # )
 
             # latent discriminator
             latent_disc_loss, latent_gen_loss, latent_disc_acc_real, latent_disc_acc_fake, latent_gen_acc = latent_gan.step(
@@ -98,10 +98,11 @@ def training_loop_(
             loss = (
                 + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
-                + (cc_vsp_loss * cfg.loss_coefficient_vsp)
+                + (cc_vsp_loss * cfg.loss_coefficient_cc_vsp)
                 + (cc_rec_margin_loss * cfg.loss_coefficient_cc_rec)
                 + (cc_trans_loss * cfg.loss_coefficient_cc_trans)
-                + ((gen_loss + latent_gen_loss) * cfg.loss_coefficient_gen)
+                + (gen_loss * cfg.loss_coefficient_gen)
+                + (latent_gen_loss * cfg.loss_coefficient_latent_gen)
             )
             exit_on_nan(loss)
             opt.zero_grad()
@@ -119,6 +120,7 @@ def training_loop_(
                 "latent_disc_loss": latent_disc_loss.item(),
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
+                "cc_vsp_loss": cc_vsp_loss.item(),
                 "cc_rec_margin_loss": cc_rec_margin_loss.item(),
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),

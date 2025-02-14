@@ -144,8 +144,8 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
         fig, ax = plt.subplots(figsize=(6,5))
         sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities')
-        ax.set_xlabel('Fake')
-        ax.set_ylabel('Real')
+        ax.set_xlabel(f'Fake ({unsup_emb}->{sup_emb})')
+        ax.set_ylabel(f'Real ({sup_emb})')
         plt.tight_layout()
         res['heatmap'] = fig 
         plt.close(fig)

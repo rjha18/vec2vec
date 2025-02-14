@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.utils.spectral_norm as spectral_norm
 
 
 def add_residual(input_x: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
@@ -20,7 +19,6 @@ class MLPWithResidual(nn.Module):
             hidden_dim: int, 
             out_dim: int,
             norm_style: bool = 'batch',
-            use_spectral_norm: bool = False,
             output_norm: bool = False,
         ):
         super().__init__()
@@ -29,8 +27,6 @@ class MLPWithResidual(nn.Module):
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
-
-        spec = spectral_norm if use_spectral_norm else lambda x: x
 
         if norm_style == 'batch':
             norm_layer = nn.BatchNorm1d
@@ -46,7 +42,7 @@ class MLPWithResidual(nn.Module):
                 hidden_dim = out_dim if self.depth == 1 else hidden_dim
                 self.layers.append(
                     nn.Sequential(
-                        spec(nn.Linear(in_dim, hidden_dim)),
+                        nn.Linear(in_dim, hidden_dim),
                         nn.SiLU(),
                         # norm_layer(hidden_dim),
                     )
@@ -54,7 +50,7 @@ class MLPWithResidual(nn.Module):
             elif layer_idx < self.depth - 1:
                 self.layers.append(
                     nn.Sequential(
-                        spec(nn.Linear(hidden_dim, hidden_dim)),
+                        nn.Linear(hidden_dim, hidden_dim),
                         nn.SiLU(),
                         norm_layer(hidden_dim),
                         nn.Dropout(p=0.1),
@@ -63,10 +59,10 @@ class MLPWithResidual(nn.Module):
             else:
                 self.layers.append(
                     nn.Sequential(
-                        spec(nn.Linear(hidden_dim, hidden_dim)),
+                        nn.Linear(hidden_dim, hidden_dim),
                         nn.Dropout(p=0.1),
                         nn.SiLU(),
-                        spec(nn.Linear(hidden_dim, out_dim)),
+                        nn.Linear(hidden_dim, out_dim),
                     )
                 )
         self.initialize_weights()
