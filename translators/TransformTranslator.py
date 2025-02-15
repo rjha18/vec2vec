@@ -17,7 +17,6 @@ class TransformTranslator(AbsNTranslator):
         depth: int = 3,
         normalize_embeddings: bool = True,
         style: str = 'unet',
-        use_target_vectors: bool = True,
         use_small_output_adapters: bool = False,
         use_residual_adapters: bool = False,
         norm_style: str = 'batch',
@@ -25,35 +24,23 @@ class TransformTranslator(AbsNTranslator):
         super().__init__(encoder_dims, d_adapter, depth)
 
         self.d_hidden = d_hidden
-        self.target_vectors = nn.ParameterDict()
         self.use_small_output_adapters = use_small_output_adapters
         self.use_residual_adapters = use_residual_adapters
         self.norm_style = norm_style
+        self.transform = transform
         for flag, dims in encoder_dims.items():
             in_adapter, out_adapter = self._make_adapters(dims)
             self.in_adapters[flag] = in_adapter
             self.out_adapters[flag] = out_adapter
-            if use_target_vectors:
-                self.target_vectors[flag] = nn.Parameter(torch.randn(d_adapter) * 0.1)
-                self.target_vectors.requires_grad_(True)
-            else:
-                self.target_vectors[flag] = torch.zeros(d_adapter, requires_grad=False)
-        self.use_target_vectors = use_target_vectors
-        self.transform = transform
         self.normalize_embeddings = normalize_embeddings
         self.style = style
 
     def translate_embeddings(
-        self, embeddings: torch.Tensor, in_name: str, out_name: str, max_noise_pow: float = 0, min_noise_pow: float = 0
+        self, embeddings: torch.Tensor, in_name: str, out_name: str,
     ) -> torch.Tensor:
-        # print(f'{in_name} -> {out_name}')
         in_adapter = self.in_adapters[in_name]
-        noisy_embeddings = self._add_noise(embeddings, max_noise_pow, min_noise_pow)
-        target_vector = self.target_vectors[out_name] if self.use_target_vectors else None
-        latents = self._get_latents(emb=noisy_embeddings, in_adapter=in_adapter, target_vector=target_vector)
-
-        out_adapter = self.out_adapters[out_name]
-        return self._out_project(latents, out_adapter)
+        latents = self._get_latents(emb=embeddings, in_adapter=in_adapter)
+        return self._out_project(latents,  self.out_adapters[out_name])
 
     def add_encoders(self, encoder_dims: dict[str, int], overwrite_embs: list[str] = None):
         for flag, dims in encoder_dims.items():
@@ -67,35 +54,27 @@ class TransformTranslator(AbsNTranslator):
     def _make_adapters(self, dims):
         assert dims is not None
         if self.use_residual_adapters:
-            print("NOTE: Using residual adapters!")
-            return MLPWithResidual(self.depth, dims, self.d_hidden, self.d_adapter, self.norm_style),\
-                   MLPWithResidual(self.depth, self.d_adapter, self.d_hidden, dims, self.norm_style, output_norm=False)
-        in_adapter = []
-        out_adapter = []
-        for _ in range(self.depth):
-            ################################################################
-            in_adapter.append(nn.Tanh())
-            in_adapter.append(nn.Linear(self.d_adapter, self.d_adapter))
-            in_adapter.append(nn.BatchNorm1d(self.d_adapter))
-            ################################################################
-            out_adapter.append(nn.Tanh())
-            out_adapter.append(nn.Linear(self.d_adapter, self.d_adapter))
-            ################################################################
-        in_adapter = [nn.Linear(dims, self.d_adapter)] + in_adapter
+            print("Using residual adapters!")
+            return (
+                MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style),
+                MLPWithResidual(self.depth, self.transform.out_dim, self.d_hidden, dims, self.norm_style)
+            )
+        assert False # TODO: Remove this option
+        return None
 
-        if self.use_small_output_adapters: # backwards compatibility
-            print("NOTE: Using old output adapter code for finetuning!")
-            out_adapter = out_adapter[:-1]
-        else:
-            out_adapter.reverse()
-        out_adapter = out_adapter + [nn.Linear(self.d_adapter, dims)]
-        return nn.Sequential(*in_adapter), nn.Sequential(*out_adapter)
+    def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module) -> torch.Tensor:
+        z = in_adapter(emb)
+        return self.transform(z)
+
+    def _out_project(self, emb: torch.Tensor, out_adapter: nn.Module) -> torch.Tensor:
+        out = out_adapter(emb)
+        if self.normalize_embeddings:
+            out = out / out.norm(dim=1, keepdim=True)
+        return out
 
     def forward(
         self,
         ins: dict[str, torch.Tensor],
-        max_noise_pow: float = 0,
-        min_noise_pow: float = 0,
         in_set: set[str] = None,
         out_set: set[str] = None,
         include_reps: bool = False,
@@ -107,46 +86,20 @@ class TransformTranslator(AbsNTranslator):
         translations = {
             flag: {} for flag in out_set
         }
-        reps = translations.copy() if self.use_target_vectors else recons.copy()
+        reps = recons.copy()
 
         for flag in in_set:
-            noisy_emb = self._add_noise(ins[flag], max_noise_pow, min_noise_pow)
-            if not self.use_target_vectors:
-                noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag])
-                if include_reps:
-                    reps[flag] = noisy_rep
+            noisy_emb = ins[flag]
+            noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag])
+            if include_reps:
+                reps[flag] = noisy_rep
             for target_flag in out_set:
-                if self.use_target_vectors:
-                    noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag], self.target_vectors[target_flag])
-                    if include_reps:
-                        reps[target_flag][flag] = noisy_rep
-                # print(f'{flag} -> {target_flag}')
                 if target_flag == flag:
-                    recons[flag] = self._out_project(noisy_rep, self.out_adapters[flag])
+                    recons[flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
                 else:
                     translations[target_flag][flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
 
         if include_reps:
             return recons, translations, reps
-        return recons, translations
-
-    def _add_noise(self, emb, max_noise_pow, min_noise_pow):
-        if self.training and not (max_noise_pow == 0 and min_noise_pow == 0):
-            noise_pow = random.uniform(min_noise_pow, max_noise_pow)
-            noise_level = 10 ** noise_pow
-            noise = torch.randn_like(emb) * noise_level
         else:
-            noise = torch.zeros_like(emb)
-        return emb + noise
-
-    def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module, target_vector: torch.Tensor = None) -> torch.Tensor:
-        z = in_adapter(emb)
-        if self.use_target_vectors:
-            z = z + target_vector
-        return self.transform(z)
-
-    def _out_project(self, emb: torch.Tensor, out_adapter: nn.Module) -> torch.Tensor:
-        out = out_adapter(emb)
-        if self.normalize_embeddings:
-            out = out / out.norm(dim=1, keepdim=True)
-        return out
+            return recons, translations

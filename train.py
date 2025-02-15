@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from translators.Discriminator import Discriminator
 
 # from eval import eval_model
-from utils.collate import MultiEncoderCollator
+from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.dist import get_rank, get_world_size
 from utils.eval_utils import EarlyStopper, eval_loop_
 from utils.gan import VanillaGAN, RelativisticGAN
@@ -28,7 +28,7 @@ from utils.wandb_logger import Logger
 
 
 def training_loop_(
-    save_dir, accelerator, gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
+    save_dir, accelerator, gan, latent_gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -47,6 +47,7 @@ def training_loop_(
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
 
+    translator.train()
     for i, (sup_batch, unsup_batch) in enumerate(dataloader_pbar):
         if max_num_batches is not None and i >= max_num_batches:
             print(f"Early stopping at {i} batches")
@@ -55,68 +56,81 @@ def training_loop_(
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
 
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
-            if cfg.add_noise:
-                min_noise_pow = -10
-                max_noise_pow = -1
-            else:
-                min_noise_pow = 0
-                max_noise_pow = 0
+            recons, translations, reps = translator(ins, include_reps=True)
 
-            recons, translations, reps = translator(ins, max_noise_pow, min_noise_pow, include_reps=True)
-
-            real_data = reps[cfg.sup_emb]
-            fake_data = reps[cfg.unsup_emb]
-
+            # discriminator
             disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-                real_data=real_data,
-                fake_data=fake_data
+                real_data=ins[cfg.sup_emb],
+                fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
             )
+            # disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = (
+            #     torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), 
+            #     torch.tensor(0.0, device=device), torch.tensor(0.0, device=device),
+            #     torch.tensor(0.0, device=device)
+            # )
 
+            # latent discriminator
+            latent_disc_loss, latent_gen_loss, latent_disc_acc_real, latent_disc_acc_fake, latent_gen_acc = latent_gan.step(
+                real_data=reps[cfg.sup_emb],
+                fake_data=reps[cfg.unsup_emb]
+            )
             rec_loss = rec_loss_fn(ins, recons, logger)
-            if cfg.loss_coefficient_cc > 0:
-                cc_keys = list(translations.keys())
-                random.shuffle(cc_keys)
-                cc_translations = dict(
-                    itertools.chain(*[{ k1: v.detach()  for v in translations[k1].values()}.items() for k1 in cc_keys]))
-                cc_recons, cc_translations = translator(cc_translations, max_noise_pow, min_noise_pow)
+
+            recons_as_translations = { in_name: { in_name: val } for in_name, val in recons.items() }
+            vsp_loss = vsp_loss_fn(ins, recons_as_translations, logger)
+            if (cfg.loss_coefficient_cc_rec > 0) or (cfg.loss_coefficient_cc_trans > 0):
+                cc_ins = {}
+                for out_flag in translations.keys():
+                    in_flag = random.choice(list(translations[out_flag].keys()))
+                    cc_ins[out_flag] = translations[out_flag][in_flag] # .detach()
+                cc_recons, cc_translations = translator(cc_ins)
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
+                cc_vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
             else:
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
-
-            if cfg.loss_coefficient_vsp > 0:
-                vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
-            else:
-                vsp_loss = torch.tensor(0.0)
+                cc_vsp_loss = torch.tensor(0.0)
 
             loss = (
-                  (rec_loss * cfg.loss_coefficient_rec)
+                + (rec_loss * cfg.loss_coefficient_rec)
                 + (vsp_loss * cfg.loss_coefficient_vsp)
-                + ((cc_rec_loss + cc_trans_loss) * cfg.loss_coefficient_cc)
-                + (gen_loss * cfg.loss_coefficient_adv)
+                + (cc_vsp_loss * cfg.loss_coefficient_cc_vsp)
+                + (cc_rec_loss * cfg.loss_coefficient_cc_rec)
+                + (cc_trans_loss * cfg.loss_coefficient_cc_trans)
+                + (gen_loss * cfg.loss_coefficient_gen)
+                + (latent_gen_loss * cfg.loss_coefficient_latent_gen)
             )
             exit_on_nan(loss)
             opt.zero_grad()
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
-            grad_norm = get_grad_norm(translator)
+            grad_norm_generator = get_grad_norm(translator)
+            grad_norm_discriminator = get_grad_norm(gan.discriminator)
+            grad_norm_latent_discriminator = get_grad_norm(latent_gan.discriminator)
 
             opt.step()
             scheduler.step()
 
             metrics = {
                 "disc_loss": disc_loss.item(),
+                "latent_disc_loss": latent_disc_loss.item(),
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
+                "cc_vsp_loss": cc_vsp_loss.item(),
                 "cc_rec_loss": cc_rec_loss.item(),
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),
+                "latent_gen_loss": latent_gen_loss.item(),
                 "loss": loss.item(),
-                "grad_norm": grad_norm.item(),
+                "grad_norm_generator": grad_norm_generator,
+                "grad_norm_discriminator": grad_norm_discriminator,
+                "grad_norm_latent_discriminator": grad_norm_latent_discriminator,
                 "learning_rate": opt.param_groups[0]["lr"],
                 "disc_acc_real": disc_acc_real,
                 "disc_acc_fake": disc_acc_fake,
+                "latent_disc_acc_real": latent_disc_acc_real,
+                "latent_disc_acc_fake": latent_disc_acc_fake,
                 "gen_acc": gen_acc,
             }
 
@@ -137,6 +151,12 @@ def main():
     cfg = toml.load(f'configs/{argv[1]}.toml')
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
+
+    # set seeds
+    random.seed(cfg.seed + get_rank())
+    torch.manual_seed(cfg.seed + get_rank())
+    np.random.seed(cfg.seed + get_rank())
+    torch.cuda.manual_seed(cfg.seed + get_rank())
 
     use_val_set = hasattr(cfg, 'val_size')
 
@@ -173,8 +193,12 @@ def main():
     assert hasattr(cfg, 'unsup_emb')
     assert cfg.sup_emb != cfg.unsup_emb
 
-    unsup_enc = {cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)}
-    unsup_dim = {cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])}
+    unsup_enc = {
+        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)
+    }
+    unsup_dim = {
+        cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
+    }
     translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
 
     assert cfg.unsup_emb not in sup_encs
@@ -185,6 +209,7 @@ def main():
     print("Number of parameters:", cfg.num_params)
     print("Number of *trainable* parameters:", sum(p.numel() for p in translator.parameters() if p.requires_grad))
     print("Number of training datapoints:", len(dset))
+    print(translator)
 
     logger = Logger(
         project=cfg.wandb_project,
@@ -193,9 +218,6 @@ def main():
         config=cfg,
     )
 
-    random.seed(cfg.seed + get_rank())
-    torch.manual_seed(cfg.seed + get_rank())
-
     num_workers = get_num_proc()
     print(f"Rank {get_rank()} using {num_workers} workers and {len(dset)} datapoints")
     if get_world_size() > 1:
@@ -203,53 +225,60 @@ def main():
         dset = dset.select(range(max_num_datapoints))
         print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
 
-    mask = np.full(len(dset), False)
+    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.seed)
+    dset = dset_dict["train"]
+    valset = dset_dict["test"]
     if hasattr(cfg, 'num_points'):
-        mask[:cfg.num_points] = True
-        np.random.seed(cfg.seed + get_rank())
-        np.random.shuffle(mask)
-        supset = dset.select(np.where(mask)[0])
-        unsupset = dset.select(np.where(~mask)[0])
-        unsupmask = np.full(len(unsupset), False)
-        unsupmask[:cfg.num_points] = True
-        np.random.seed(cfg.seed + get_rank())
-        np.random.shuffle(unsupmask)
-        if use_val_set:
-            valset = unsupset.select(np.where(~unsupmask)[0])
-            valmask = np.full(len(valset), False)
-            valmask[:cfg.val_size] = True
-            np.random.seed(cfg.seed + get_rank())
-            np.random.shuffle(valmask)
-            valset = valset.select(np.where(valmask)[0])
-        unsupset = unsupset.select(np.where(unsupmask)[0])
+        supset = dset.shuffle(seed=cfg.seed + 1).select(range(cfg.num_points))
+        unsupset = dset.shuffle(seed=cfg.seed + 2).select(range(cfg.num_points))
+    
+    supset = MultiencoderTokenizedDataset(
+        dataset=supset,
+        encoders=sup_encs,
+        n_embs_per_batch=cfg.n_embs_per_batch,
+        batch_size=cfg.bs,
+        max_length=cfg.max_seq_length, 
+        seed=cfg.seed,
+    )
+    unsupset = MultiencoderTokenizedDataset(
+        dataset=unsupset,
+        encoders=unsup_enc,
+        n_embs_per_batch=1, 
+        batch_size=cfg.bs,
+        max_length=cfg.max_seq_length, 
+        seed=cfg.seed,
+    )
 
     sup_dataloader = DataLoader(
         supset,
         batch_size=cfg.bs,
-        num_workers=num_workers,
+        num_workers=num_workers // 2,
         shuffle=True,
         pin_memory=True,
-        prefetch_factor=(8 if num_workers > 0 else None),
-        collate_fn=MultiEncoderCollator(
-            sup_encs, cfg.n_embs_per_batch, max_length=cfg.max_seq_length
-        ),
+        prefetch_factor=None,
+        collate_fn=TokenizedCollator(),
         drop_last=True,
     )
-
     unsup_dataloader = DataLoader(
         unsupset,
         batch_size=cfg.bs,
-        num_workers=num_workers,
+        num_workers=num_workers // 2,
         shuffle=True,
         pin_memory=True,
-        prefetch_factor=(8 if num_workers > 0 else None),
-        collate_fn=MultiEncoderCollator(
-            unsup_enc, 1, max_length=cfg.max_seq_length
-        ),
+        prefetch_factor=None,
+        collate_fn=TokenizedCollator(),
         drop_last=True,
     )
 
     if use_val_set:
+        valset = MultiencoderTokenizedDataset(
+            dataset=valset,
+            encoders={ **unsup_enc, **sup_encs },
+            n_embs_per_batch=2, 
+            batch_size=cfg.val_bs,
+            max_length=cfg.max_seq_length, 
+            seed=cfg.seed,
+        )
         valloader = DataLoader(
             valset,
             batch_size=cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
@@ -257,9 +286,7 @@ def main():
             shuffle=False,
             pin_memory=True,
             prefetch_factor=(8 if num_workers > 0 else None),
-            collate_fn=MultiEncoderCollator(
-                {**sup_encs, **unsup_enc}, len({**sup_encs, **unsup_enc}), max_length=cfg.max_seq_length
-            ),
+            collate_fn=TokenizedCollator(),
             drop_last=True,
         )
         valloader = accelerator.prepare(valloader)
@@ -279,10 +306,25 @@ def main():
             if step < warmup_length:
                 return min(1, step / warmup_length)
             else:
-                return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
+                return 1
         scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
-    disc_norm = 'spectral' if hasattr(cfg, 'use_spectral') and cfg.use_spectral else None
-    disc = Discriminator(cfg.d_adapter, cfg.disc_dim, cfg.disc_depth, cfg.use_residual, norm_style=disc_norm)
+    latent_disc = Discriminator(
+        latent_dim=cfg.d_adapter, 
+        discriminator_dim=cfg.disc_dim, 
+        depth=cfg.disc_depth, 
+    )
+    disc = Discriminator(
+        latent_dim=768, # TODO: where to get this from? 
+        discriminator_dim=cfg.disc_dim, 
+        depth=cfg.disc_depth, 
+    )
+    cfg.num_disc_params = sum(x.numel() for x in disc.parameters()) + sum(x.numel() for x in latent_disc.parameters())
+    print(f"Number of discriminator parameters:", cfg.num_disc_params)
+    print(disc)
+    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
+    print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
+    print(latent_disc)
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
@@ -290,8 +332,8 @@ def main():
         translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
         disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
 
-    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt = accelerator.prepare(
-        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt
+    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, latent_disc, disc_opt, latent_disc_opt = accelerator.prepare(
+        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, latent_disc, disc_opt, latent_disc_opt
     )
 
     best_model = None
@@ -301,12 +343,32 @@ def main():
         min_delta=cfg.delta if hasattr(cfg, 'delta') else 0
     )
 
+    if cfg.gan_style == "vanilla":
+        gan_cls = VanillaGAN
+    elif cfg.gan_style == "relativistic":
+        gan_cls = RelativisticGAN
+    else:
+        raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
+    latent_gan = gan_cls(
+        cfg=cfg,
+        generator=translator,
+        discriminator=latent_disc,
+        discriminator_opt=latent_disc_opt,
+        accelerator=accelerator
+    )
+    gan = gan_cls(
+        cfg=cfg,
+        generator=translator,
+        discriminator=disc,
+        discriminator_opt=disc_opt,
+        accelerator=accelerator
+    )
     for epoch in range(max_num_epochs):
         if use_val_set and get_rank() == 0:
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
-                recons, trans, heatmap = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
+                recons, trans, heatmap_dict = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
                 for flag, res in recons.items():
                     for k, v in res.items():
                         if k == 'cos':
@@ -318,46 +380,26 @@ def main():
                                 continue
                             val_res[f"val/{flag}_{target_flag}_{k}"] = v
 
-                if heatmap is not None:
-                    for k, v in heatmap.items():
-                        if k == 'heatmap':
+                if heatmap_dict is not None:
+                    for k,v in heatmap_dict.items():
+                        if k in ["heatmap", "heatmap_softmax"]:
                             v = wandb.Image(v)
                         val_res[f"val/{k}"] = v
                 wandb.log(val_res)
+                translator.train()
 
-                # if early_stopper.early_stop(val_res['stop_cond']):
-                #     print("Stopping early! Saving previous model...")
-                #     break
-                # else:
-                #     best_model = translator.state_dict().copy()
-                #     best_disc = disc.state_dict().copy()
-
-        if cfg.gan_style == "vanilla":
-            gan_cls = VanillaGAN
-        elif cfg.gan_style == "relativistic":
-            gan_cls = RelativisticGAN
-        else:
-            raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
-        gan = gan_cls(
-            cfg=cfg,
-            generator=translator,
-            discriminator=disc,
-            generator_opt=opt,
-            discriminator_opt=disc_opt,
-            accelerator=accelerator
-        )
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:
             max_num_batches = max(1, (cfg.epochs - epoch) * len(supset) // cfg.bs // get_world_size())
             print(f"Setting max_num_batches to {max_num_batches}")
 
-        translator.train()
         training_loop_(
             save_dir=save_dir,
             accelerator=accelerator,
             translator=translator,
             gan=gan,
+            latent_gan=latent_gan,
             sup_dataloader=sup_dataloader,
             unsup_dataloader=unsup_dataloader,
             sup_encs=sup_encs,

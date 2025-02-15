@@ -42,7 +42,13 @@ def load_n_translator(cfg, encoder_dims):
             nn.SiLU(),
         )
     elif cfg.style == 'res_mlp':
-        transform = MLPWithResidual(cfg.transform_depth, cfg.d_adapter, cfg.d_transform, cfg.d_adapter, cfg.norm_style)
+        transform = MLPWithResidual(
+            depth=cfg.transform_depth,
+            in_dim=cfg.d_adapter, 
+            hidden_dim=cfg.d_transform, 
+            out_dim=cfg.d_adapter, 
+            norm_style=cfg.norm_style
+    )
     elif cfg.style == 'n_ae':
         transform = nn.Sequential(
             nn.Linear(cfg.d_adapter, cfg.latent_dims),
@@ -65,7 +71,6 @@ def load_n_translator(cfg, encoder_dims):
         transform=transform,
         depth=cfg.depth,
         style=cfg.style,
-        use_target_vectors=cfg.use_target_vectors,
         use_small_output_adapters=cfg.use_small_output_adapters if hasattr(cfg, 'use_small_output_adapters') else False,
         use_residual_adapters=cfg.use_residual_adapters if hasattr(cfg, 'use_residual_adapters') else False,
         norm_style=cfg.norm_style if hasattr(cfg, 'norm_style') else 'batch',

@@ -1,24 +1,32 @@
+import torch
 import torch.nn as nn
 from translators.MLPWithResidual import MLPWithResidual
 
 class Discriminator(nn.Module):
-    def __init__(self, latent_dim, discriminator_dim=1024, depth=3, use_residual=False, norm_style=None):
-        super(Discriminator, self).__init__()
+    def __init__(self, latent_dim, discriminator_dim: int = 1024, depth: int = 3):
+        super().__init__()
         self.latent_dim = latent_dim
 
-        if use_residual:
-            self.discriminator = MLPWithResidual(depth, latent_dim, discriminator_dim, 1, norm_style)
-        else:
-            assert depth >= 1
-            layers = []
+        assert depth >= 1, "Depth must be at least 1"
+        layers = []
+        if depth >= 2:
             layers.append(nn.Linear(latent_dim, discriminator_dim))
-            for _ in range(depth - 1):
-                layers.append(nn.Tanh())
+            for _ in range(depth - 2):
+                layers.append(nn.SiLU())
                 layers.append(nn.Linear(discriminator_dim, discriminator_dim))
-            layers.append(nn.Tanh())
+            layers.append(nn.SiLU())
             layers.append(nn.Linear(discriminator_dim, 1))
-            self.discriminator = nn.Sequential(*layers)
-
+        else:
+            layers.append(nn.Linear(latent_dim, 1))
+        self.discriminator = nn.Sequential(*layers)
+        self.initialize_weights()
+    
+    def initialize_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                module.bias.data.fill_(0)
 
     def forward(self, x):
-        return self.discriminator(x)
+        output = self.discriminator(x)
+        return output

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 def add_residual(input_x: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     if input_x.shape[1] < x.shape[1]:
         padding = torch.zeros(x.shape[0], x.shape[1] - input_x.shape[1], device=x.device)
@@ -8,6 +9,7 @@ def add_residual(input_x: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     elif input_x.shape[1] > x.shape[1]:
         input_x = input_x[:, :x.shape[1]]
     return x + input_x
+
 
 class MLPWithResidual(nn.Module):
     def __init__(
@@ -17,7 +19,7 @@ class MLPWithResidual(nn.Module):
             hidden_dim: int, 
             out_dim: int,
             norm_style: bool = 'batch',
-            output_norm: bool = True,
+            output_norm: bool = False,
         ):
         super().__init__()
         self.depth = depth
@@ -26,14 +28,12 @@ class MLPWithResidual(nn.Module):
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
 
-        assert norm_style in ['batch', 'layer', 'spectral', None]
-        batch_norm = None
         if norm_style == 'batch':
-            batch_norm = nn.BatchNorm1d
+            norm_layer = nn.BatchNorm1d
         elif norm_style == 'layer':
-            batch_norm = nn.LayerNorm
-        elif norm_style == 'spectral':
-            spec = nn.utils.spectral_norm
+            norm_layer = nn.LayerNorm
+        else:
+            raise ValueError(f"Unknown norm style: {norm_style}")
 
 
         for layer_idx in range(self.depth):
@@ -42,40 +42,45 @@ class MLPWithResidual(nn.Module):
                 hidden_dim = out_dim if self.depth == 1 else hidden_dim
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(in_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(in_dim, hidden_dim)),
+                        nn.Linear(in_dim, hidden_dim),
                         nn.SiLU(),
-                        nn.Dropout(p=0.01),
-                        batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
+                        # norm_layer(hidden_dim),
                     )
                 )
             elif layer_idx < self.depth - 1:
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(hidden_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, hidden_dim)),
+                        nn.Linear(hidden_dim, hidden_dim),
                         nn.SiLU(),
-                        nn.Dropout(p=0.01),
-                        batch_norm(hidden_dim) if batch_norm is not None else nn.Identity(),
+                        norm_layer(hidden_dim),
+                        nn.Dropout(p=0.1),
                     )
                 )
             else:
                 self.layers.append(
                     nn.Sequential(
-                        nn.Linear(hidden_dim, hidden_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, hidden_dim)),
-                        nn.Dropout(p=0.01),
+                        nn.Linear(hidden_dim, hidden_dim),
+                        nn.Dropout(p=0.1),
                         nn.SiLU(),
-                        nn.Linear(hidden_dim, out_dim) if norm_style != 'spectral' else spec(nn.Linear(hidden_dim, out_dim)),
+                        nn.Linear(hidden_dim, out_dim),
                     )
                 )
-
-        self.output_layer = batch_norm(out_dim) if batch_norm is not None and output_norm else nn.Identity()
         self.initialize_weights()
+        if output_norm:
+            self.output_norm = nn.LayerNorm(out_dim, elementwise_affine=False)
+        else:
+            self.output_norm = None
     
     def initialize_weights(self):
+        # for module in self.modules():
+        #     if isinstance(module, nn.Linear):
+        #         torch.nn.init.normal_(module.weight, std=0.02)
+        #         if module.bias is not None:
+        #             torch.nn.init.zeros_(module.bias)
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
+                torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                module.bias.data.fill_(0)
          
     def forward(self, x):
         for layer in self.layers:
@@ -83,5 +88,7 @@ class MLPWithResidual(nn.Module):
             x = layer(x)
             x = add_residual(input_x, x)
         
-        x = self.output_layer(x) + x
+        if self.output_norm is not None:
+            x = self.output_norm(x)
+
         return x

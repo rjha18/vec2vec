@@ -68,8 +68,10 @@ def eval_batch(ins, recons, translations):
     recon_res = {}
     translation_res = {}
     for target_flag, emb in ins.items():
+        emb = emb / emb.norm(dim=1, keepdim=True)
         in_distances = 1 - (emb @ emb.T)
         rec = recons[target_flag]
+        rec = rec / rec.norm(dim=1, keepdim=True)
         rec_distances = 1 - (rec @ rec.T)
         recon_res[target_flag] = {
             "mse": F.mse_loss(emb, rec).item(),
@@ -79,6 +81,7 @@ def eval_batch(ins, recons, translations):
         }
         translation_res[target_flag] = {}
         for flag, trans in translations[target_flag].items():
+            trans = trans / trans.norm(dim=1, keepdim=True)
             out_distances = 1 - (trans @ trans.T)
             translation_res[target_flag][flag] = {
                 "mse": F.mse_loss(emb, trans).item(),
@@ -121,26 +124,48 @@ def top_k_accuracy(sims, k=1):
     return np.mean(np.any(top_k_preds == correct, axis=1))  # Check if correct label is in top-k
 
 
-def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16):
+def get_rank(sims: np.ndarray) -> float:
+    ranks = (sims.argsort(1) == np.arange(sims.shape[0])).argmax(1)
+    return ranks.mean() + 1
+
+
+def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16) -> dict:
     res = {}
     ins = {k: v[:top_k_size] for k, v in ins.items()}
     trans = translator.translate_embeddings(ins[unsup_emb], unsup_emb, sup_emb)
-    sims = 1 - cosine_distances(ins[sup_emb].cpu(), trans.cpu())
-    res['top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
-    res[f'top_{k}_acc'] = top_k_accuracy(sims, k)
+    ins_norm = F.normalize(ins[sup_emb].cpu(), p=2, dim=1)
+    trans_norm = F.normalize(trans.cpu(), p=2, dim=1)
+    sims = (ins_norm @ trans_norm.T).numpy()
+    sims_softmax = F.softmax(torch.tensor(sims) * 50, dim=1).numpy()
+    res['top_1_acc'] = (sims_softmax.argmax(axis=1) == np.arange(sims_softmax.shape[0])).mean()
+    res[f'top_{k}_acc'] = top_k_accuracy(sims_softmax, k)
+    res["top_rank"] = get_rank(sims_softmax)
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
-        res['heatmap_top_1_acc'] = np.mean(np.diagonal(sims) >= np.max(sims, axis=1))
+        res['heatmap_top_1_acc'] = top_k_accuracy(sims, 1)
         if heatmap_size > k:
             res[f'heatmap_top_{k}_acc'] = top_k_accuracy(sims, k)
+
+        # plot sims
         fig, ax = plt.subplots(figsize=(6,5))
         sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities')
-        ax.set_xlabel('Fake')
-        ax.set_ylabel('Real')
-
+        ax.set_xlabel(f'Fake ({unsup_emb}->{sup_emb})')
+        ax.set_ylabel(f'Real ({sup_emb})')
+        plt.tight_layout()
         res['heatmap'] = fig 
         plt.close(fig)
+    
+        # plot sims w/ softmax
+        fig, ax = plt.subplots(figsize=(6,5))
+        sns.heatmap(sims_softmax, cmap='coolwarm', ax=ax)
+        ax.set_title('Heatmap of cosine similarities (softmaxed)')
+        ax.set_xlabel(f'Fake ({unsup_emb}->{sup_emb})')
+        ax.set_ylabel(f'Real ({sup_emb})')
+        plt.tight_layout()
+        res['heatmap_softmax'] = fig 
+        plt.close(fig)
+
     return res
 
 def eval_loop_(
@@ -156,7 +181,7 @@ def eval_loop_(
         for _, batch in enumerate(iter):
             ins = process_batch(cfg, batch, encoders, device)                
             n += cfg.val_bs
-            recons, translations = translator(ins, 0.0, False)
+            recons, translations = translator(ins, include_reps=False)
             
             r_res, t_res = eval_batch(ins, recons, translations)
             merge_dicts(recon_res, r_res)
