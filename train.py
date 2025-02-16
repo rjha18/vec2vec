@@ -54,6 +54,10 @@ def training_loop_(
             break
         with accelerator.accumulate(translator), accelerator.autocast():
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
+            translator.zero_grad()
+            gan.discriminator.zero_grad()
+            latent_gan.discriminator.zero_grad()
+            similarity_gan.discriminator.zero_grad()
 
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
             recons, translations, reps = translator(ins, include_reps=True)
@@ -113,6 +117,7 @@ def training_loop_(
             grad_norm_generator = get_grad_norm(translator)
             grad_norm_discriminator = get_grad_norm(gan.discriminator)
             grad_norm_latent_discriminator = get_grad_norm(latent_gan.discriminator)
+            grad_norm_similarity_discriminator = get_grad_norm(similarity_gan.discriminator)
 
             opt.step()
             scheduler.step()
@@ -128,10 +133,12 @@ def training_loop_(
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),
                 "latent_gen_loss": latent_gen_loss.item(),
+                "similarity_gen_loss": similarity_gen_loss.item(),
                 "loss": loss.item(),
                 "grad_norm_generator": grad_norm_generator,
                 "grad_norm_discriminator": grad_norm_discriminator,
                 "grad_norm_latent_discriminator": grad_norm_latent_discriminator,
+                "grad_norm_similarity_discriminator": grad_norm_similarity_discriminator,
                 "learning_rate": opt.param_groups[0]["lr"],
                 "disc_acc_real": disc_acc_real,
                 "disc_acc_fake": disc_acc_fake,

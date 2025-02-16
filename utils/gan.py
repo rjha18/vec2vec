@@ -67,6 +67,7 @@ class VanillaGAN:
             torch.Tensor, torch.Tensor, float, float, float]:
         self.generator.eval()
         self.discriminator.train()
+        self.discriminator.zero_grad()
         disc_loss, disc_acc_real, disc_acc_fake = self.step_discriminator(
             real_data=real_data.detach(),
             fake_data=fake_data.detach()
