@@ -125,7 +125,7 @@ def top_k_accuracy(sims, k=1):
 
 
 def get_avg_rank(sims: np.ndarray) -> float:
-    ranks = (sims.argsort(1) == np.arange(sims.shape[0]))
+    ranks = (sims.argsort(1) == np.arange(sims.shape[0])[:, None])
     return ranks.argmax(1).mean() + 1
 
 
