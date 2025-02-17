@@ -34,6 +34,7 @@ loss_coefficient_cc_vsp = 1
 loss_coefficient_gen = 1.0
 loss_coefficient_latent_gen = 1.0
 loss_coefficient_disc = 1.0
+loss_coefficient_similarity_gen = 0.0
 add_noise = 0
 add_noise_rotation = 0
 force_dump = true

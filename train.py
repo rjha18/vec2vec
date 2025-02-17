@@ -28,7 +28,7 @@ from utils.wandb_logger import Logger
 
 
 def training_loop_(
-    save_dir, accelerator, gan, latent_gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
+    save_dir, accelerator, gan, latent_gan, similarity_gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -54,6 +54,10 @@ def training_loop_(
             break
         with accelerator.accumulate(translator), accelerator.autocast():
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
+            translator.zero_grad()
+            gan.discriminator.zero_grad()
+            latent_gan.discriminator.zero_grad()
+            similarity_gan.discriminator.zero_grad()
 
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
             recons, translations, reps = translator(ins, include_reps=True)
@@ -63,17 +67,21 @@ def training_loop_(
                 real_data=ins[cfg.sup_emb],
                 fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
             )
-            # disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = (
-            #     torch.tensor(0.0, device=device), torch.tensor(0.0, device=device), 
-            #     torch.tensor(0.0, device=device), torch.tensor(0.0, device=device),
-            #     torch.tensor(0.0, device=device)
-            # )
 
             # latent discriminator
             latent_disc_loss, latent_gen_loss, latent_disc_acc_real, latent_disc_acc_fake, latent_gen_acc = latent_gan.step(
                 real_data=reps[cfg.sup_emb],
                 fake_data=reps[cfg.unsup_emb]
             )
+
+            # similarity discriminator
+            real_sims = ins[cfg.sup_emb] @ ins[cfg.sup_emb].T
+            fake_sims = translations[cfg.sup_emb][cfg.unsup_emb] @ translations[cfg.sup_emb][cfg.unsup_emb].T
+            similarity_disc_loss, similarity_gen_loss, similarity_disc_acc_real, similarity_disc_acc_fake, similarity_gen_acc = similarity_gan.step(
+                real_data=real_sims,
+                fake_data=fake_sims,
+            )
+
             rec_loss = rec_loss_fn(ins, recons, logger)
 
             recons_as_translations = { in_name: { in_name: val } for in_name, val in recons.items() }
@@ -100,6 +108,7 @@ def training_loop_(
                 + (cc_trans_loss * cfg.loss_coefficient_cc_trans)
                 + (gen_loss * cfg.loss_coefficient_gen)
                 + (latent_gen_loss * cfg.loss_coefficient_latent_gen)
+                + (similarity_gen_loss * cfg.loss_coefficient_similarity_gen)
             )
             exit_on_nan(loss)
             opt.zero_grad()
@@ -108,6 +117,7 @@ def training_loop_(
             grad_norm_generator = get_grad_norm(translator)
             grad_norm_discriminator = get_grad_norm(gan.discriminator)
             grad_norm_latent_discriminator = get_grad_norm(latent_gan.discriminator)
+            grad_norm_similarity_discriminator = get_grad_norm(similarity_gan.discriminator)
 
             opt.step()
             scheduler.step()
@@ -115,6 +125,7 @@ def training_loop_(
             metrics = {
                 "disc_loss": disc_loss.item(),
                 "latent_disc_loss": latent_disc_loss.item(),
+                "similarity_disc_loss": similarity_disc_loss.item(),
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
                 "cc_vsp_loss": cc_vsp_loss.item(),
@@ -122,16 +133,21 @@ def training_loop_(
                 "cc_trans_loss": cc_trans_loss.item(),
                 "gen_loss": gen_loss.item(),
                 "latent_gen_loss": latent_gen_loss.item(),
+                "similarity_gen_loss": similarity_gen_loss.item(),
                 "loss": loss.item(),
                 "grad_norm_generator": grad_norm_generator,
                 "grad_norm_discriminator": grad_norm_discriminator,
                 "grad_norm_latent_discriminator": grad_norm_latent_discriminator,
+                "grad_norm_similarity_discriminator": grad_norm_similarity_discriminator,
                 "learning_rate": opt.param_groups[0]["lr"],
                 "disc_acc_real": disc_acc_real,
                 "disc_acc_fake": disc_acc_fake,
                 "latent_disc_acc_real": latent_disc_acc_real,
                 "latent_disc_acc_fake": latent_disc_acc_fake,
                 "gen_acc": gen_acc,
+                "similarity_disc_acc_real": similarity_disc_acc_real,
+                "similarity_disc_acc_fake": similarity_disc_acc_fake,
+                "similarity_gen_acc": similarity_gen_acc,
             }
 
             for metric, value in metrics.items():
@@ -308,32 +324,47 @@ def main():
             else:
                 return 1
         scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
-    latent_disc = Discriminator(
-        latent_dim=cfg.d_adapter, 
-        discriminator_dim=cfg.disc_dim, 
-        depth=cfg.disc_depth, 
-    )
+    
+    
+    ######################################################################################
     disc = Discriminator(
         latent_dim=768, # TODO: where to get this from? 
         discriminator_dim=cfg.disc_dim, 
         depth=cfg.disc_depth, 
     )
-    cfg.num_disc_params = sum(x.numel() for x in disc.parameters()) + sum(x.numel() for x in latent_disc.parameters())
+    disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
     print(disc)
-    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    ######################################################################################
+    latent_disc = Discriminator(
+        latent_dim=cfg.d_adapter, 
+        discriminator_dim=cfg.disc_dim, 
+        depth=cfg.disc_depth, 
+    )
     cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
     print(latent_disc)
-    disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    ######################################################################################
+    similarity_disc = Discriminator(
+        latent_dim=cfg.bs, 
+        discriminator_dim=cfg.disc_dim, 
+        depth=cfg.disc_depth,
+    )
+    cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
+    print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
+    print(similarity_disc)
+    similarity_disc_opt = torch.optim.RMSprop(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    ######################################################################################
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
         print(f"Loading models from {cfg.load_dir}...")
         translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
         disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
 
-    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, latent_disc, disc_opt, latent_disc_opt = accelerator.prepare(
-        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, latent_disc, disc_opt, latent_disc_opt
+    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt, latent_disc, latent_disc_opt, similarity_disc, similarity_disc_opt = accelerator.prepare(
+        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt, latent_disc, latent_disc_opt, similarity_disc, similarity_disc_opt
     )
 
     best_model = None
@@ -354,6 +385,13 @@ def main():
         generator=translator,
         discriminator=latent_disc,
         discriminator_opt=latent_disc_opt,
+        accelerator=accelerator
+    )
+    similarity_gan = gan_cls(
+        cfg=cfg,
+        generator=translator,
+        discriminator=similarity_disc,
+        discriminator_opt=similarity_disc_opt,
         accelerator=accelerator
     )
     gan = gan_cls(
@@ -400,6 +438,7 @@ def main():
             translator=translator,
             gan=gan,
             latent_gan=latent_gan,
+            similarity_gan=similarity_gan,
             sup_dataloader=sup_dataloader,
             unsup_dataloader=unsup_dataloader,
             sup_encs=sup_encs,
