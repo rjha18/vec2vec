@@ -74,6 +74,7 @@ class VanillaGAN:
         )
         self.generator.train()
         self.discriminator.eval()
+        self.discriminator.zero_grad()
         gen_loss, gen_acc = self.step_generator(
             real_data=real_data,
             fake_data=fake_data
