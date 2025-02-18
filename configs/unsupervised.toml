@@ -1,38 +1,40 @@
 [general]
 use_wandb = 1
 seed = 0
-style = 'unet'
+style = 'res_mlp'
 d_adapter = 512
 d_hidden = 1024
 normalize_embeddings = true
 depth = 3
-transform_depth = 4
-# embs = [ "gte", "gtr", "stella", "sentence-t5", "e5", "snowflake", "ember", "sbert", "gist", "clip", "bert-nli",]
+transform_depth = 5
 lm_base_name = "google-bert/bert-base-uncased"
 upscale_num = 16
 n_embs_per_batch = 1
-max_seq_length = 512
+max_seq_length = 64
 mixed_precision = 'bf16'
 val_size = 4096
+norm_style='batch'
+d_transform=768
+use_spectral=1
 
 [train]
 unsup_emb = 'gte'
 sup_emb = 'gtr'
-lr = 1e-4
-bs = 512
-save_every = 6_000
+lr = 1e-5
+bs = 128
+save_every = 300
 epochs = 10
 val_bs = 256
 dataset = "nq"
 max_grad_norm = 10.0
 gradient_accumulation_steps = 1
-loss_coefficient_rec = 1
-loss_coefficient_vsp = 1
-loss_coefficient_cc_trans = 1
-loss_coefficient_cc_rec = 1
-loss_coefficient_cc_vsp = 1
+loss_coefficient_rec = 0
+loss_coefficient_vsp = 10.0
+loss_coefficient_cc_trans = 10.0
+loss_coefficient_cc_rec = 10.0
+loss_coefficient_cc_vsp = 10.0
 loss_coefficient_gen = 1.0
-loss_coefficient_latent_gen = 1.0
+loss_coefficient_latent_gen = 0.1
 loss_coefficient_disc = 1.0
 loss_coefficient_similarity_gen = 0.0
 add_noise = 0
@@ -52,7 +54,7 @@ finetune_mode = false
 gan_style = "vanilla"
 
 [logging]
-wandb_project = 'unsupervised_disc'
+wandb_project = 'unsupervised_hyperparams'
 wandb_name = 'unsupervised'
 load_dir = './finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
 save_dir = './finetuning_unsupervised/{}/'
@@ -60,8 +62,10 @@ save_dir = './finetuning_unsupervised/{}/'
 
 [discriminator]
 smooth = 0.9
-disc_dim = 1024
-disc_depth = 3
-disc_lr = 1e-4
+disc_dim = 512
+disc_depth = 4
+disc_lr = 1e-5
 eps = 6.25e-10
 use_residual = true
+
+# python train.py unsupervised --num_points 100000 --epochs 2000 --seed 5
