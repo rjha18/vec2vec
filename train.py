@@ -90,7 +90,8 @@ def training_loop_(
                 cc_ins = {}
                 for out_flag in translations.keys():
                     in_flag = random.choice(list(translations[out_flag].keys()))
-                    cc_ins[out_flag] = translations[out_flag][in_flag] # .detach()
+                    cc_ins[out_flag] = translations[out_flag][in_flag]
+                    cc_ins[out_flag] = cc_ins[out_flag] if hasattr(cfg, 'no_detach') and cfg.no_detach else cc_ins[out_flag].detach()
                 cc_recons, cc_translations = translator(cc_ins)
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
