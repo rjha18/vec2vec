@@ -54,10 +54,6 @@ def training_loop_(
             break
         with accelerator.accumulate(translator), accelerator.autocast():
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
-            translator.zero_grad()
-            gan.discriminator.zero_grad()
-            latent_gan.discriminator.zero_grad()
-            similarity_gan.discriminator.zero_grad()
 
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
             recons, translations, reps = translator(ins, include_reps=True)
