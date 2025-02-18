@@ -54,22 +54,17 @@ def training_loop_(
             break
         with accelerator.accumulate(translator), accelerator.autocast():
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
-            translator.zero_grad()
-            gan.discriminator.zero_grad()
-            latent_gan.discriminator.zero_grad()
-            similarity_gan.discriminator.zero_grad()
-
             ins = {**process_batch(cfg, sup_batch, sup_encs, device), **process_batch(cfg, unsup_batch, unsup_enc, device)}
             recons, translations, reps = translator(ins, include_reps=True)
 
             # discriminator
-            disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
+            disc_r1_penalty, disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
                 real_data=ins[cfg.sup_emb],
                 fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
             )
 
             # latent discriminator
-            latent_disc_loss, latent_gen_loss, latent_disc_acc_real, latent_disc_acc_fake, latent_gen_acc = latent_gan.step(
+            latent_disc_r1_penalty, latent_disc_loss, latent_gen_loss, latent_disc_acc_real, latent_disc_acc_fake, latent_gen_acc = latent_gan.step(
                 real_data=reps[cfg.sup_emb],
                 fake_data=reps[cfg.unsup_emb]
             )
@@ -77,11 +72,10 @@ def training_loop_(
             # similarity discriminator
             real_sims = ins[cfg.sup_emb] @ ins[cfg.sup_emb].T
             fake_sims = translations[cfg.sup_emb][cfg.unsup_emb] @ translations[cfg.sup_emb][cfg.unsup_emb].T
-            similarity_disc_loss, similarity_gen_loss, similarity_disc_acc_real, similarity_disc_acc_fake, similarity_gen_acc = similarity_gan.step(
+            similarity_r1_penalty, similarity_disc_loss, similarity_gen_loss, similarity_disc_acc_real, similarity_disc_acc_fake, similarity_gen_acc = similarity_gan.step(
                 real_data=real_sims,
                 fake_data=fake_sims,
             )
-
             rec_loss = rec_loss_fn(ins, recons, logger)
 
             recons_as_translations = { in_name: { in_name: val } for in_name, val in recons.items() }
@@ -90,8 +84,7 @@ def training_loop_(
                 cc_ins = {}
                 for out_flag in translations.keys():
                     in_flag = random.choice(list(translations[out_flag].keys()))
-                    cc_ins[out_flag] = translations[out_flag][in_flag]
-                    cc_ins[out_flag] = cc_ins[out_flag] if hasattr(cfg, 'no_detach') and cfg.no_detach else cc_ins[out_flag].detach()
+                    cc_ins[out_flag] = translations[out_flag][in_flag].detach()
                 cc_recons, cc_translations = translator(cc_ins)
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
@@ -125,8 +118,11 @@ def training_loop_(
 
             metrics = {
                 "disc_loss": disc_loss.item(),
+                "disc_r1_penalty": disc_r1_penalty.item(),
                 "latent_disc_loss": latent_disc_loss.item(),
+                "latent_disc_r1_penalty": latent_disc_r1_penalty.item(),
                 "similarity_disc_loss": similarity_disc_loss.item(),
+                "similarity_r1_penalty": similarity_r1_penalty.item(),
                 "rec_loss": rec_loss.item(),
                 "vsp_loss": vsp_loss.item(),
                 "cc_vsp_loss": cc_vsp_loss.item(),
