@@ -172,6 +172,11 @@ def main():
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
 
+    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16':
+        cfg.mixed_precision = 'bf16' if torch.cuda.is_bf16_supported() else 'fp16'
+        cfg.gradient_accumulation_steps = 1
+        print("Note: bf16 is not available on this hardware! Reverting to fp16 and setting accumulation steps to 1.")
+
     # set seeds
     random.seed(cfg.seed + get_rank())
     torch.manual_seed(cfg.seed + get_rank())
@@ -181,7 +186,7 @@ def main():
     use_val_set = hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
-        mixed_precision=cfg.mixed_precision,
+        mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps
     )
     # https://github.com/huggingface/transformers/issues/26548
@@ -197,7 +202,7 @@ def main():
 
     dset = load_streaming_embeddings(cfg.dataset)
 
-    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision='bf16' == cfg.mixed_precision)}
+    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)}
     encoder_dims = {cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])}
     translator = load_n_translator(cfg, encoder_dims)
 
@@ -214,7 +219,7 @@ def main():
     assert cfg.sup_emb != cfg.unsup_emb
 
     unsup_enc = {
-        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)
+        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
     }
     unsup_dim = {
         cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
