@@ -172,8 +172,8 @@ def main():
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
 
-    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16':
-        cfg.mixed_precision = 'bf16' if torch.cuda.is_bf16_supported() else 'fp16'
+    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
+        cfg.mixed_precision = 'fp16'
         cfg.gradient_accumulation_steps = 1
         print("Note: bf16 is not available on this hardware! Reverting to fp16 and setting accumulation steps to 1.")
 
