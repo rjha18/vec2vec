@@ -71,12 +71,19 @@ def training_loop_(
             )
 
             # similarity discriminator
-            real_sims = ins[cfg.sup_emb] @ ins[cfg.sup_emb].T
-            fake_sims = translations[cfg.sup_emb][cfg.unsup_emb] @ translations[cfg.sup_emb][cfg.unsup_emb].T
-            similarity_disc_loss, similarity_gen_loss, similarity_disc_acc_real, similarity_disc_acc_fake, similarity_gen_acc = similarity_gan.step(
-                real_data=real_sims,
-                fake_data=fake_sims,
-            )
+            if cfg.loss_coefficient_similarity_gen > 0:
+                real_sims = ins[cfg.sup_emb] @ ins[cfg.sup_emb].T
+                fake_sims = translations[cfg.sup_emb][cfg.unsup_emb] @ translations[cfg.sup_emb][cfg.unsup_emb].T
+                similarity_disc_loss, similarity_gen_loss, similarity_disc_acc_real, similarity_disc_acc_fake, similarity_gen_acc = similarity_gan.step(
+                    real_data=real_sims,
+                    fake_data=fake_sims,
+                )
+            else:
+                similarity_disc_loss = torch.tensor(0.0)
+                similarity_gen_loss = torch.tensor(0.0)
+                similarity_disc_acc_real = 0.0
+                similarity_disc_acc_fake = 0.0
+                similarity_gen_acc = 0.0
 
             rec_loss = rec_loss_fn(ins, recons, logger)
 
