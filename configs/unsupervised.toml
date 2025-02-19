@@ -27,6 +27,7 @@ dataset = "nq"
 max_grad_norm = 10.0
 gradient_accumulation_steps = 2
 loss_coefficient_rec = 1
+loss_coefficient_reverse_rec = 0.0
 loss_coefficient_vsp = 1
 loss_coefficient_cc_trans = 1
 loss_coefficient_cc_rec = 1

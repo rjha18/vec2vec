@@ -16,16 +16,11 @@ class TransformTranslator(AbsNTranslator):
         transform: nn.Module,
         depth: int = 3,
         normalize_embeddings: bool = True,
-        style: str = 'unet',
-        use_small_output_adapters: bool = False,
-        use_residual_adapters: bool = False,
-        norm_style: str = 'batch',
+        norm_style: str = 'layer',
     ):
         super().__init__(encoder_dims, d_adapter, depth)
 
         self.d_hidden = d_hidden
-        self.use_small_output_adapters = use_small_output_adapters
-        self.use_residual_adapters = use_residual_adapters
         self.norm_style = norm_style
         self.transform = transform
         for flag, dims in encoder_dims.items():
@@ -33,7 +28,6 @@ class TransformTranslator(AbsNTranslator):
             self.in_adapters[flag] = in_adapter
             self.out_adapters[flag] = out_adapter
         self.normalize_embeddings = normalize_embeddings
-        self.style = style
 
     def translate_embeddings(
         self, embeddings: torch.Tensor, in_name: str, out_name: str,
@@ -53,14 +47,11 @@ class TransformTranslator(AbsNTranslator):
 
     def _make_adapters(self, dims):
         assert dims is not None
-        if self.use_residual_adapters:
-            print("Using residual adapters!")
-            return (
-                MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style),
-                MLPWithResidual(self.depth, self.transform.out_dim, self.d_hidden, dims, self.norm_style)
-            )
-        assert False # TODO: Remove this option
-        return None
+        print("Using residual adapters!")
+        return (
+            MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style),
+            MLPWithResidual(self.depth, self.transform.out_dim, self.d_hidden, dims, self.norm_style)
+        )
 
     def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module) -> torch.Tensor:
         z = in_adapter(emb)
@@ -83,9 +74,7 @@ class TransformTranslator(AbsNTranslator):
         out_set = out_set if out_set is not None else ins.keys()
 
         recons = {}
-        translations = {
-            flag: {} for flag in out_set
-        }
+        translations = {}
         reps = recons.copy()
 
         for flag in in_set:
@@ -97,6 +86,7 @@ class TransformTranslator(AbsNTranslator):
                 if target_flag == flag:
                     recons[flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
                 else:
+                    if target_flag not in translations: translations[target_flag] = {}
                     translations[target_flag][flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
 
         if include_reps:

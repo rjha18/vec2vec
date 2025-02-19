@@ -18,7 +18,7 @@ class MLPWithResidual(nn.Module):
             in_dim: int, 
             hidden_dim: int, 
             out_dim: int,
-            norm_style: bool = 'batch',
+            norm_style: bool = 'layer',
             output_norm: bool = False,
         ):
         super().__init__()

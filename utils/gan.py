@@ -45,19 +45,18 @@ class VanillaGAN:
         disc_acc_fake = (d_fake_logits.sigmoid() > 0.5).float().mean().item()
 
         r1_penalty = self.compute_gradient_penalty(real_data)
-        r2_penalty = self.compute_gradient_penalty(fake_data)
 
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(
-            (disc_loss * self.cfg.loss_coefficient_disc) + r1_penalty + r2_penalty
+            disc_loss + (r1_penalty * 0.1)  * self.cfg.loss_coefficient_disc
         )
         self.accelerator.clip_grad_norm_(
             self.discriminator.parameters(),
             self.cfg.max_grad_norm
         )
         self.discriminator_opt.step()
-        return (r1_penalty + r2_penalty).detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
+        return r1_penalty.detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
 
     def _step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
         d_fake_logits = self.discriminator(fake_data)

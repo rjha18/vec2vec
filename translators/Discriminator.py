@@ -14,6 +14,7 @@ class Discriminator(nn.Module):
             for _ in range(depth - 2):
                 layers.append(nn.SiLU())
                 layers.append(nn.Linear(discriminator_dim, discriminator_dim))
+                layers.append(nn.LayerNorm(discriminator_dim))
             layers.append(nn.SiLU())
             layers.append(nn.Linear(discriminator_dim, 1))
         else:

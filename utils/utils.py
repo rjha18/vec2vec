@@ -70,9 +70,6 @@ def load_n_translator(cfg, encoder_dims):
         d_hidden=cfg.d_hidden,
         transform=transform,
         depth=cfg.depth,
-        style=cfg.style,
-        use_small_output_adapters=cfg.use_small_output_adapters if hasattr(cfg, 'use_small_output_adapters') else False,
-        use_residual_adapters=cfg.use_residual_adapters if hasattr(cfg, 'use_residual_adapters') else False,
         norm_style=cfg.norm_style if hasattr(cfg, 'norm_style') else 'batch',
     )
 
