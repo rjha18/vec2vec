@@ -331,7 +331,7 @@ def main():
             if step < warmup_length:
                 return min(1, step / warmup_length)
             else:
-                return 1
+                return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
         scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
     
     
