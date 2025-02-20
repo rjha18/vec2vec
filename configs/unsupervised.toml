@@ -1,6 +1,7 @@
 [general]
 use_wandb = 1
 seed = 0
+dataset_seed = 42
 style = 'res_mlp'
 d_adapter = 512
 d_hidden = 1024
@@ -12,19 +13,18 @@ upscale_num = 16
 n_embs_per_batch = 1
 max_seq_length = 64
 mixed_precision = 'bf16'
-val_size = 4096
-norm_style='batch'
-d_transform=768
-use_spectral=1
+val_size = 32768
+norm_style = 'batch'
+d_transform = 768
+use_spectral = 1
 
 [train]
 unsup_emb = 'gte'
 sup_emb = 'gtr'
 lr = 1e-5
 bs = 128
-save_every = 300
 epochs = 10
-val_bs = 256
+val_bs = 1024
 dataset = "nq"
 max_grad_norm = 10.0
 gradient_accumulation_steps = 2
@@ -46,16 +46,17 @@ patience = 25
 delta = 0.0
 use_small_output_adapters = false
 use_residual_adapters = true
-no_scheduler = false
-top_k_size = 128
-heatmap_size = 16
+no_scheduler = true
+top_k_size = 1024
+heatmap_size = 64
 k = 16
 finetune_mode = false
 gan_style = "vanilla"
+top_k_batches = 16
 warmup_length = 100
 
 [logging]
-wandb_project = 'unsupervised_hyperparams'
+wandb_project = 'unsupervised_disc'
 wandb_name = 'unsupervised'
 load_dir = './finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
 save_dir = './finetuning_unsupervised/{}/'
