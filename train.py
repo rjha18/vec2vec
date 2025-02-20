@@ -1,4 +1,3 @@
-import math
 import os
 import random
 import toml
@@ -9,6 +8,7 @@ import accelerate
 from tqdm import tqdm
 import wandb
 
+import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -17,7 +17,7 @@ from translators.Discriminator import Discriminator
 # from eval import eval_model
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.dist import get_rank, get_world_size
-from utils.eval_utils import EarlyStopper, eval_loop_
+from utils.eval_utils import eval_loop_
 from utils.gan import VanillaGAN, RelativisticGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
@@ -163,12 +163,12 @@ def training_loop_(
         toml.dump(cfg.__dict__, f)
     torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
 
-# TODO: change embs to supervised_emb
+
 def main():
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
     cfg = toml.load(f'configs/{argv[1]}.toml')
     unknown_cfg = read_args(argv)
-    cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
+    cfg = SimpleNamespace(**{**{k: v for d in cfg.values() for k, v in d.items()}, **unknown_cfg})
 
     if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
         cfg.mixed_precision = 'fp16'
@@ -208,10 +208,6 @@ def main():
     disc_save_dir = os.path.join(save_dir, 'disc.pt')
 
     os.makedirs(save_dir, exist_ok=True)
-
-    # if hasattr(cfg, 'freeze_params') and cfg.freeze_params:
-    #     for param in translator.parameters():
-    #         param.requires_grad = False
 
     assert hasattr(cfg, 'unsup_emb')
     assert cfg.sup_emb != cfg.unsup_emb
@@ -253,21 +249,21 @@ def main():
     if hasattr(cfg, 'num_points'):
         supset = dset.shuffle(seed=cfg.seed + 1).select(range(cfg.num_points))
         unsupset = dset.shuffle(seed=cfg.seed + 2).select(range(cfg.num_points))
-    
+
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
         encoders=sup_encs,
         n_embs_per_batch=cfg.n_embs_per_batch,
         batch_size=cfg.bs,
-        max_length=cfg.max_seq_length, 
+        max_length=cfg.max_seq_length,
         seed=cfg.seed,
     )
     unsupset = MultiencoderTokenizedDataset(
         dataset=unsupset,
         encoders=unsup_enc,
-        n_embs_per_batch=1, 
+        n_embs_per_batch=1,
         batch_size=cfg.bs,
-        max_length=cfg.max_seq_length, 
+        max_length=cfg.max_seq_length,
         seed=cfg.seed,
     )
 
@@ -296,9 +292,9 @@ def main():
         valset = MultiencoderTokenizedDataset(
             dataset=valset,
             encoders={ **unsup_enc, **sup_encs },
-            n_embs_per_batch=2, 
+            n_embs_per_batch=2,
             batch_size=cfg.val_bs,
-            max_length=cfg.max_seq_length, 
+            max_length=cfg.max_seq_length,
             seed=cfg.seed,
         )
         valloader = DataLoader(
@@ -317,26 +313,26 @@ def main():
     
     ######################################################################################
     disc = Discriminator(
-        latent_dim=768, # TODO: where to get this from? 
-        discriminator_dim=cfg.disc_dim, 
-        depth=cfg.disc_depth, 
+        latent_dim=768, # TODO: where to get this from?
+        discriminator_dim=cfg.disc_dim,
+        depth=cfg.disc_depth,
     )
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
     ######################################################################################
     latent_disc = Discriminator(
-        latent_dim=cfg.d_adapter, 
-        discriminator_dim=cfg.disc_dim, 
-        depth=cfg.disc_depth, 
+        latent_dim=cfg.d_adapter,
+        discriminator_dim=cfg.disc_dim,
+        depth=cfg.disc_depth,
     )
     latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
     ######################################################################################
     similarity_disc = Discriminator(
-        latent_dim=cfg.bs, 
-        discriminator_dim=cfg.disc_dim, 
+        latent_dim=cfg.bs,
+        discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
     )
     similarity_disc_opt = torch.optim.RMSprop(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
@@ -344,7 +340,7 @@ def main():
     print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
     ######################################################################################
 
-    max_num_epochs = int(math.ceil(cfg.epochs))
+    max_num_epochs = int(np.ceil(cfg.epochs))
     steps_per_epoch = len(supset) // cfg.bs
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
     warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100) * get_world_size()
@@ -376,10 +372,6 @@ def main():
 
     best_model = None
     best_disc = None
-    early_stopper = EarlyStopper(
-        patience=cfg.patience if hasattr(cfg, 'patience') else 1,
-        min_delta=cfg.delta if hasattr(cfg, 'delta') else 0
-    )
 
     if cfg.gan_style == "vanilla":
         gan_cls = VanillaGAN
@@ -470,14 +462,6 @@ def main():
     torch.save(best_model, model_save_dir)
     torch.save(best_disc, disc_save_dir)
 
-    # # eval
-    # cfg.use_good_queries = 1
-    # cfg.dataset = "NanoNQ"
-    # cfg.max_seq_length = cfg.max_seq_length
-    # cfg.batch_size = cfg.bs
-    # cfg.train_path = save_dir
-    # metrics = eval_model(cfg=cfg, translator=translator)
-    # wandb.log({ f"eval/k": v for k,v in metrics.items() })
 
 if __name__ == "__main__":
     main()
