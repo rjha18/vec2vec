@@ -3,6 +3,7 @@ seed = 0
 dataset_seed = 42
 normalize_embeddings = true
 mixed_precision = 'bf16'
+weight_init = 'orthogonal'
 dataset = "nq"
 max_seq_length = 64
 unsup_emb = 'gte'

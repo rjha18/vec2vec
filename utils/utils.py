@@ -7,7 +7,6 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from huggingface_hub.file_download import hf_hub_download
-from translators import TransformTranslator
 from safetensors.torch import load_file
 
 from utils.embeddings import load_and_process_embeddings_from_idxs
@@ -46,8 +45,9 @@ def load_n_translator(cfg, encoder_dims):
             in_dim=cfg.d_adapter, 
             hidden_dim=cfg.d_transform, 
             out_dim=cfg.d_adapter, 
-            norm_style=cfg.norm_style
-    )
+            norm_style=cfg.norm_style,
+            weight_init=cfg.weight_init,
+        )
     elif cfg.style == 'n_ae':
         transform = nn.Sequential(
             nn.Linear(cfg.d_adapter, cfg.latent_dims),
@@ -66,10 +66,10 @@ def load_n_translator(cfg, encoder_dims):
         d_adapter=cfg.d_adapter,
         d_hidden=cfg.d_hidden,
         transform=transform,
+        weight_init=cfg.weight_init,
         depth=cfg.depth,
         style=cfg.style,
         use_small_output_adapters=cfg.use_small_output_adapters if hasattr(cfg, 'use_small_output_adapters') else False,
-        use_residual_adapters=cfg.use_residual_adapters if hasattr(cfg, 'use_residual_adapters') else False,
         norm_style=cfg.norm_style if hasattr(cfg, 'norm_style') else 'batch',
     )
 

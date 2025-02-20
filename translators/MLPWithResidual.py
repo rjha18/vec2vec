@@ -20,6 +20,7 @@ class MLPWithResidual(nn.Module):
             out_dim: int,
             norm_style: bool = 'batch',
             output_norm: bool = False,
+            weight_init: str = 'kaiming'
         ):
         super().__init__()
         self.depth = depth
@@ -65,21 +66,23 @@ class MLPWithResidual(nn.Module):
                         nn.Linear(hidden_dim, out_dim),
                     )
                 )
-        self.initialize_weights()
+        self.initialize_weights(weight_init)
         if output_norm:
             self.output_norm = nn.LayerNorm(out_dim, elementwise_affine=False)
         else:
             self.output_norm = None
     
-    def initialize_weights(self):
-        # for module in self.modules():
-        #     if isinstance(module, nn.Linear):
-        #         torch.nn.init.normal_(module.weight, std=0.02)
-        #         if module.bias is not None:
-        #             torch.nn.init.zeros_(module.bias)
+    def initialize_weights(self, weight_init: str):
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                if weight_init == 'kaiming':
+                    torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                elif weight_init == 'xavier':
+                    torch.nn.init.xavier_normal_(module.weight)
+                elif weight_init == 'orthogonal':
+                    torch.nn.init.orthogonal_(module.weight)
+                else:
+                    raise ValueError(f"Unknown weight initialization: {weight_init}")
                 module.bias.data.fill_(0)
          
     def forward(self, x):
