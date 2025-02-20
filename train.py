@@ -3,7 +3,6 @@ import random
 import toml
 from sys import argv
 from types import SimpleNamespace
-from itertools import chain
 
 import accelerate
 from tqdm import tqdm
@@ -310,25 +309,8 @@ def main():
         )
         valloader = accelerator.prepare(valloader)
 
-    max_num_epochs = int(np.ceil(cfg.epochs))
-
     opt = torch.optim.AdamW(translator.parameters(), lr=cfg.lr, fused=False, weight_decay=0.00)
-    steps_per_epoch = len(supset) // cfg.bs
-    total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
-    if not hasattr(cfg, 'no_scheduler') or not cfg.no_scheduler:
-        # linear
-        scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
-    else:
-        # constant with warmup
-        warmup_length = 100 * get_world_size()
-        def lr_lambda(step):
-            if step < warmup_length:
-                return min(1, step / warmup_length)
-            else:
-                return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
-        scheduler = LambdaLR(opt, lr_lambda=lr_lambda)
-
-
+    
     ######################################################################################
     disc = Discriminator(
         latent_dim=768, # TODO: where to get this from?
@@ -360,15 +342,36 @@ def main():
     cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
     print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
     ######################################################################################
+
+    max_num_epochs = int(np.ceil(cfg.epochs))
+    steps_per_epoch = len(supset) // cfg.bs
+    total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
+    warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100) * get_world_size()
+
+    def lr_lambda(step):
+        if step < warmup_length:
+            return min(1, step / warmup_length)
+        else:
+            if hasattr(cfg, 'no_scheduler') and cfg.no_scheduler:
+                return 1
+            return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
+
+    scheduler = LambdaLR(opt, lr_lambda=lr_lambda)
+    disc_scheduler = LambdaLR(disc_opt, lr_lambda=lr_lambda)
+    latent_disc_scheduler = LambdaLR(latent_disc_opt, lr_lambda=lr_lambda)
+    similarity_disc_scheduler = LambdaLR(similarity_disc_opt, lr_lambda=lr_lambda)
+
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
         print(f"Loading models from {cfg.load_dir}...")
         translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
         disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
 
-    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt, latent_disc, latent_disc_opt, similarity_disc, similarity_disc_opt = accelerator.prepare(
-        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt, latent_disc, latent_disc_opt, similarity_disc, similarity_disc_opt
-    )
+    translator, opt, scheduler = accelerator.prepare(translator, opt, scheduler)
+    disc, disc_opt, disc_scheduler = accelerator.prepare(disc, disc_opt, disc_scheduler)
+    latent_disc, latent_disc_opt, latent_disc_scheduler = accelerator.prepare(latent_disc, latent_disc_opt, latent_disc_scheduler)
+    similarity_disc, similarity_disc_opt, similarity_disc_scheduler = accelerator.prepare(similarity_disc, similarity_disc_opt, similarity_disc_scheduler)
+    sup_dataloader, unsup_dataloader = accelerator.prepare(sup_dataloader, unsup_dataloader)
 
     best_model = None
     best_disc = None
@@ -384,21 +387,24 @@ def main():
         generator=translator,
         discriminator=latent_disc,
         discriminator_opt=latent_disc_opt,
-        accelerator=accelerator
+        discriminator_scheduler=latent_disc_scheduler,
+        accelerator=accelerator,
     )
     similarity_gan = gan_cls(
         cfg=cfg,
         generator=translator,
         discriminator=similarity_disc,
         discriminator_opt=similarity_disc_opt,
-        accelerator=accelerator
+        discriminator_scheduler=similarity_disc_scheduler,
+        accelerator=accelerator,
     )
     gan = gan_cls(
         cfg=cfg,
         generator=translator,
         discriminator=disc,
         discriminator_opt=disc_opt,
-        accelerator=accelerator
+        discriminator_scheduler=disc_scheduler,
+        accelerator=accelerator,
     )
     for epoch in range(max_num_epochs):
         if use_val_set and get_rank() == 0:
