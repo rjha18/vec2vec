@@ -58,6 +58,11 @@ def training_loop_(
                 **process_batch(cfg, sup_batch, sup_encs, device), 
                 **process_batch(cfg, unsup_batch, unsup_enc, device)
             }
+            cfg.noise_level = 1e-4 # TODO argparse
+            ins = {
+                    key: val + torch.randn_like(val, device=val.device) * cfg.noise_level
+                    for key, val in ins.items()
+            }
             recons, translations, reps = translator(
                 ins, include_reps=True
             )
