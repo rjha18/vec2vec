@@ -3,7 +3,7 @@ seed = 0
 dataset_seed = 42
 normalize_embeddings = true
 mixed_precision = 'bf16'
-weight_init = 'orthogonal'
+weight_init = 'kaiming'
 dataset = "nq"
 max_seq_length = 64
 unsup_emb = 'gte'
@@ -31,7 +31,7 @@ use_residual = true
 [train]
 epochs = 10
 bs = 128
-gradient_accumulation_steps = 2
+gradient_accumulation_steps = 1
 lr = 1e-5
 no_scheduler = true
 max_grad_norm = 10.0
