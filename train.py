@@ -427,7 +427,9 @@ def main():
                     for k,v in heatmap_dict.items():
                         if k in ["heatmap", "heatmap_softmax"]:
                             v = wandb.Image(v)
-                        val_res[f"val/{k}_avg_{cfg.top_k_batches}"] = v
+                            val_res[f"val/{k}"] = v
+                        else:
+                            val_res[f"val/{k} (avg. {cfg.top_k_batches} batches)"] = v
                 wandb.log(val_res)
                 translator.train()
 

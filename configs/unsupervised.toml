@@ -1,7 +1,7 @@
 [general]
 use_wandb = 1
 seed = 0
-dataset_seed=42
+dataset_seed = 42
 style = 'res_mlp'
 d_adapter = 512
 d_hidden = 1024
@@ -14,9 +14,9 @@ n_embs_per_batch = 1
 max_seq_length = 64
 mixed_precision = 'bf16'
 val_size = 32768
-norm_style='batch'
-d_transform=768
-use_spectral=1
+norm_style = 'batch'
+d_transform = 768
+use_spectral = 1
 
 [train]
 unsup_emb = 'gte'
