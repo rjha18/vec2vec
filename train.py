@@ -58,13 +58,9 @@ def training_loop_(
                 **process_batch(cfg, sup_batch, sup_encs, device), 
                 **process_batch(cfg, unsup_batch, unsup_enc, device)
             }
-            cfg.noise_level = 1e-4 # TODO argparse
-            ins = {
-                    key: val + torch.randn_like(val, device=val.device) * cfg.noise_level
-                    for key, val in ins.items()
-            }
+            cfg.noise_level = 1e-5 # TODO argparse
             recons, translations, reps = translator(
-                ins, include_reps=True
+                ins, noise_level=cfg.noise_level, include_reps=True
             )
 
             # discriminator
@@ -283,7 +279,7 @@ def main():
         dset = dset.select(range(max_num_datapoints))
         print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.seed)
+    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=42)
     dset = dset_dict["train"]
     valset = dset_dict["test"]
     if hasattr(cfg, 'num_points'):

@@ -69,6 +69,7 @@ class TransformTranslator(AbsNTranslator):
         in_set: set[str] = None,
         out_set: set[str] = None,
         include_reps: bool = False,
+        noise_level: float = 0.0,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         in_set = in_set if in_set is not None else ins.keys()
         out_set = out_set if out_set is not None else ins.keys()
@@ -79,6 +80,9 @@ class TransformTranslator(AbsNTranslator):
 
         for flag in in_set:
             noisy_emb = ins[flag]
+            if self.training and noise_level > 0.0:
+                noisy_emb += torch.randn_like(noisy_emb, device=noisy_emb.device) * noise_level
+                noisy_emb = noisy_emb / noisy_emb.norm(p=2, dim=1, keepdim=True) # TODO check bool
             noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag])
             if include_reps:
                 reps[flag] = noisy_rep

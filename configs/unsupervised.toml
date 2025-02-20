@@ -13,7 +13,7 @@ upscale_num = 16
 n_embs_per_batch = 1
 max_seq_length = 512
 mixed_precision = 'bf16'
-val_size = 4096
+val_size = 8192
 
 [train]
 unsup_emb = 'gte'
@@ -47,7 +47,7 @@ use_small_output_adapters = false
 use_residual_adapters = true
 no_scheduler = true
 top_k_size = 128
-heatmap_size = 16
+heatmap_size = 1024
 k = 16
 finetune_mode = false
 gan_style = "vanilla"
