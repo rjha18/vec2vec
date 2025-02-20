@@ -39,6 +39,7 @@ loss_coefficient_vsp = 10.0
 loss_coefficient_cc_trans = 10.0
 loss_coefficient_cc_rec = 10.0
 loss_coefficient_cc_vsp = 10.0
+warmup_length = 100
 
 [gan]
 disc_lr = 1e-5
