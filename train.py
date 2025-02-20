@@ -234,7 +234,6 @@ def main():
     print("Number of parameters:", cfg.num_params)
     print("Number of *trainable* parameters:", sum(p.numel() for p in translator.parameters() if p.requires_grad))
     print("Number of training datapoints:", len(dset))
-    print(translator)
 
     logger = Logger(
         project=cfg.wandb_project,
@@ -250,7 +249,7 @@ def main():
         dset = dset.select(range(max_num_datapoints))
         print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.seed)
+    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.dataset_seed)
     dset = dset_dict["train"]
     valset = dset_dict["test"]
     if hasattr(cfg, 'num_points'):
@@ -344,27 +343,24 @@ def main():
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
-    print(disc)
     ######################################################################################
     latent_disc = Discriminator(
         latent_dim=cfg.d_adapter, 
         discriminator_dim=cfg.disc_dim, 
         depth=cfg.disc_depth, 
     )
+    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
-    print(latent_disc)
-    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     ######################################################################################
     similarity_disc = Discriminator(
         latent_dim=cfg.bs, 
         discriminator_dim=cfg.disc_dim, 
         depth=cfg.disc_depth,
     )
+    similarity_disc_opt = torch.optim.RMSprop(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
     print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
-    print(similarity_disc)
-    similarity_disc_opt = torch.optim.RMSprop(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     ######################################################################################
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
@@ -427,11 +423,11 @@ def main():
                                 continue
                             val_res[f"val/{flag}_{target_flag}_{k}"] = v
 
-                if heatmap_dict is not None:
+                if len(heatmap_dict) > 0:
                     for k,v in heatmap_dict.items():
                         if k in ["heatmap", "heatmap_softmax"]:
                             v = wandb.Image(v)
-                        val_res[f"val/{k}"] = v
+                        val_res[f"val/{k}_avg_{cfg.top_k_batches}"] = v
                 wandb.log(val_res)
                 translator.train()
 

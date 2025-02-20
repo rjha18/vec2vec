@@ -112,8 +112,10 @@ def mean_dicts(full):
         for key, val in f.items():
             if isinstance(val, dict):
                 recursive_mean(val)
-            else:
+            elif isinstance(val, list) and len(val) > 1:
                 f[key] = np.mean(val)
+            else:
+                f[key] = val[0]
     
     recursive_mean(full)
 
@@ -125,7 +127,7 @@ def top_k_accuracy(sims, k=1):
 
 
 def get_avg_rank(sims: np.ndarray) -> float:
-    ranks = (sims.argsort(1) == np.arange(sims.shape[0])[:, None])
+    ranks = (np.argsort(-sims) == np.arange(sims.shape[0])[:, None])
     return ranks.argmax(1).mean() + 1
 
 
@@ -136,12 +138,12 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
     ins_norm = F.normalize(ins[sup_emb].cpu(), p=2, dim=1)
     trans_norm = F.normalize(trans.cpu(), p=2, dim=1)
     sims = (ins_norm @ trans_norm.T).numpy()
-    sims_softmax = F.softmax(torch.tensor(sims) * 100, dim=1).numpy()
-    res['top_1_acc'] = (sims_softmax.argmax(axis=1) == np.arange(sims_softmax.shape[0])).mean()
-    res[f'top_{k}_acc'] = top_k_accuracy(sims_softmax, k)
-    res["top_rank"] = get_avg_rank(sims_softmax)
+    res['top_1_acc'] = (sims.argmax(axis=1) == np.arange(sims.shape[0])).mean()
+    res[f'top_{k}_acc'] = top_k_accuracy(sims, k)
+    res["top_rank"] = get_avg_rank(sims)
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
+        sims_softmax = F.softmax(torch.tensor(sims) * 100, dim=1).numpy()
         res['heatmap_top_1_acc'] = top_k_accuracy(sims, 1)
         if heatmap_size > k:
             res[f'heatmap_top_{k}_acc'] = top_k_accuracy(sims, k)
@@ -173,12 +175,12 @@ def eval_loop_(
 ):
     recon_res = {}
     translation_res = {}
-    heatmap_res = None
+    heatmap_res = {}
 
-    compute_top_k = cfg.top_k_size > 0 if hasattr(cfg, 'top_k_size') and hasattr(cfg, 'k') else False
+    top_k_batches = cfg.top_k_batches if hasattr(cfg, 'top_k_batches') else 0
     with torch.no_grad():
         n = 0
-        for _, batch in enumerate(iter):
+        for i, batch in enumerate(iter):
             ins = process_batch(cfg, batch, encoders, device)                
             n += cfg.val_bs
             recons, translations = translator(ins, include_reps=False)
@@ -186,13 +188,19 @@ def eval_loop_(
             r_res, t_res = eval_batch(ins, recons, translations)
             merge_dicts(recon_res, r_res)
             merge_dicts(translation_res, t_res)
-            if compute_top_k:
-                heatmap_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, cfg.heatmap_size, cfg.k)
-                compute_top_k = False
+            if i < top_k_batches and hasattr(cfg, 'top_k_size') and hasattr(cfg, 'k') and cfg.top_k_size > 0:
+                heatmap_size = cfg.heatmap_size if i == top_k_batches - 1 else None
+                batch_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, heatmap_size, cfg.k)
+                merge_dicts(heatmap_res, batch_res)
             if pbar is not None:
                 pbar.update(1)
+
         mean_dicts(recon_res)
         mean_dicts(translation_res)
+        print(heatmap_res)
+        mean_dicts(heatmap_res)
+        print(heatmap_res)
+        input()
         return recon_res, translation_res, heatmap_res
 
 # TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.
