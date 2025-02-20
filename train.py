@@ -160,10 +160,9 @@ def training_loop_(
             if get_rank() == 0:
                 dataloader_pbar.set_postfix(metrics)
 
-        if (i + 1) % cfg.save_every == 0:
-            with open(save_dir + 'config.toml', 'w') as f:
-                toml.dump(cfg.__dict__, f)
-            torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
+    with open(save_dir + 'config.toml', 'w') as f:
+        toml.dump(cfg.__dict__, f)
+    torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
 
 # TODO: change embs to supervised_emb
 def main():

@@ -23,7 +23,6 @@ unsup_emb = 'gte'
 sup_emb = 'gtr'
 lr = 1e-5
 bs = 128
-save_every = 300
 epochs = 10
 val_bs = 1024
 dataset = "nq"
