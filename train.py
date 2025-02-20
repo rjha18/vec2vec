@@ -18,7 +18,7 @@ from translators.Discriminator import Discriminator
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.dist import get_rank, get_world_size
 from utils.eval_utils import eval_loop_
-from utils.gan import VanillaGAN, RelativisticGAN
+from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings, process_batch
@@ -438,6 +438,8 @@ def main():
 
     if cfg.gan_style == "vanilla":
         gan_cls = VanillaGAN
+    elif cfg.gan_style == "least_squares":
+        gan_cls = LeastSquaresGAN
     elif cfg.gan_style == "relativistic":
         gan_cls = RelativisticGAN
     else:

@@ -99,6 +99,45 @@ class VanillaGAN:
         return r1_penalty, disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc
 
 
+
+class LeastSquaresGAN(VanillaGAN):
+    def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, float, float]:
+        d_real_logits, d_fake_logits = self.discriminator(real_data), self.discriminator(fake_data)
+
+        device = d_real_logits.device
+        batch_size = d_real_logits.size(0)
+        real_labels = torch.ones((batch_size, 1), device=device) * (1 - self.cfg.smooth)
+        fake_labels = torch.ones((batch_size, 1), device=device) * self.cfg.smooth
+        disc_loss_real = F.mse_loss(d_real_logits, real_labels)
+        disc_loss_fake = F.mse_loss(d_fake_logits, fake_labels)
+        disc_loss = (disc_loss_real + disc_loss_fake) / 2
+        disc_acc_real = (d_real_logits.sigmoid() < 0.5).float().mean().item()
+        disc_acc_fake = (d_fake_logits.sigmoid() > 0.5).float().mean().item()
+
+        r1_penalty = self.compute_gradient_penalty(real_data)
+
+        self.generator.train()
+        self.discriminator_opt.zero_grad()
+        self.accelerator.backward(
+            disc_loss + (r1_penalty * 1.0)  * self.cfg.loss_coefficient_disc
+        )
+        self.accelerator.clip_grad_norm_(
+            self.discriminator.parameters(),
+            self.cfg.max_grad_norm
+        )
+        self.discriminator_opt.step()
+        self.discriminator_scheduler.step()
+        return r1_penalty.detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
+
+    def _step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
+        d_fake_logits = self.discriminator(fake_data)
+        device = fake_data.device
+        batch_size = fake_data.size(0)
+        real_labels = torch.zeros((batch_size, 1), device=device)
+        gen_loss = F.mse_loss(d_fake_logits, real_labels)
+        gen_acc = (d_fake_logits.sigmoid() < 0.5).float().mean().item()
+        return gen_loss, gen_acc
+
 class RelativisticGAN(VanillaGAN):
     def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float, float]:
         self.generator.eval()
