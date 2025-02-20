@@ -197,10 +197,7 @@ def eval_loop_(
 
         mean_dicts(recon_res)
         mean_dicts(translation_res)
-        print(heatmap_res)
         mean_dicts(heatmap_res)
-        print(heatmap_res)
-        input()
         return recon_res, translation_res, heatmap_res
 
 # TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.
