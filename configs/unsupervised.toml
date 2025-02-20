@@ -53,6 +53,7 @@ k = 16
 finetune_mode = false
 gan_style = "vanilla"
 top_k_batches = 16
+warmup_length = 100
 
 [logging]
 wandb_project = 'unsupervised_disc'
