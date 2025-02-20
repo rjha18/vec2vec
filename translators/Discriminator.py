@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-from translators.MLPWithResidual import MLPWithResidual
 
 class Discriminator(nn.Module):
-    def __init__(self, latent_dim, discriminator_dim: int = 1024, depth: int = 3):
+    def __init__(self, latent_dim, discriminator_dim: int = 1024, depth: int = 3, weight_init: str = 'kaiming'):
         super().__init__()
         self.latent_dim = latent_dim
 
@@ -19,12 +18,19 @@ class Discriminator(nn.Module):
         else:
             layers.append(nn.Linear(latent_dim, 1))
         self.discriminator = nn.Sequential(*layers)
-        self.initialize_weights()
+        self.initialize_weights(weight_init)
     
-    def initialize_weights(self):
+    def initialize_weights(self, weight_init: str):
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                if weight_init == 'kaiming':
+                    torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
+                elif weight_init == 'xavier':
+                    torch.nn.init.xavier_normal_(module.weight)
+                elif weight_init == 'orthogonal':
+                    torch.nn.init.orthogonal_(module.weight)
+                else:
+                    raise ValueError(f"Unknown weight initialization: {weight_init}")
                 module.bias.data.fill_(0)
 
     def forward(self, x):

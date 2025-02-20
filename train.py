@@ -316,6 +316,7 @@ def main():
         latent_dim=768, # TODO: where to get this from?
         discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
+        weight_init=cfg.weight_init
     )
     disc_opt = torch.optim.RMSprop(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
@@ -325,6 +326,7 @@ def main():
         latent_dim=cfg.d_adapter,
         discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
+        weight_init=cfg.weight_init
     )
     latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
@@ -334,6 +336,7 @@ def main():
         latent_dim=cfg.bs,
         discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
+        weight_init=cfg.weight_init
     )
     similarity_disc_opt = torch.optim.RMSprop(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
