@@ -32,7 +32,7 @@ use_residual = true
 [train]
 epochs = 10
 bs = 128
-gradient_accumulation_steps = 2
+gradient_accumulation_steps = 1
 lr = 1e-5
 no_scheduler = true
 max_grad_norm = 10.0

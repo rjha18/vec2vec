@@ -31,6 +31,10 @@ class VanillaGAN:
         )[0]
         
         return gradients.pow(2).sum().mean()
+    
+    def set_discriminator_requires_grad(self, rg: bool) -> None:
+        for module in self.discriminator.parameters():
+            module.requires_grad = rg
 
     def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, float, float]:
         d_real_logits, d_fake_logits = self.discriminator(real_data), self.discriminator(fake_data)
@@ -85,12 +89,14 @@ class VanillaGAN:
             torch.Tensor, torch.Tensor, torch.Tensor, float, float, float]:
         self.generator.eval()
         self.discriminator.train()
+        self.set_discriminator_requires_grad(True)
         r1_penalty, disc_loss, disc_acc_real, disc_acc_fake = self.step_discriminator(
             real_data=real_data.detach(),
             fake_data=fake_data.detach()
         )
         self.generator.train()
         self.discriminator.eval()
+        self.set_discriminator_requires_grad(False)
         gen_loss, gen_acc = self.step_generator(
             real_data=real_data,
             fake_data=fake_data
