@@ -1,72 +1,68 @@
 [general]
-use_wandb = 1
 seed = 0
 dataset_seed = 42
-style = 'res_mlp'
-d_adapter = 512
-d_hidden = 1024
 normalize_embeddings = true
-depth = 3
-transform_depth = 5
-lm_base_name = "google-bert/bert-base-uncased"
-upscale_num = 16
-n_embs_per_batch = 1
-max_seq_length = 64
 mixed_precision = 'bf16'
-val_size = 32768
-norm_style = 'batch'
-d_transform = 768
-use_spectral = 1
-
-[train]
+dataset = "nq"
+max_seq_length = 64
 unsup_emb = 'gte'
 sup_emb = 'gtr'
-lr = 1e-5
-bs = 128
+n_embs_per_batch = 1
+finetune_mode = false
+
+[translator]
+style = 'res_mlp'
+norm_style = 'batch'
+depth = 3
+transform_depth = 5
+d_adapter = 512
+d_hidden = 1024
+d_transform = 768
+use_small_output_adapters = false
+use_residual_adapters = true
+
+[discriminator]
+gan_style = "vanilla"
+disc_depth = 4
+disc_dim = 512
+use_residual = true
+
+[train]
 epochs = 10
-val_bs = 1024
-dataset = "nq"
-max_grad_norm = 10.0
+bs = 128
 gradient_accumulation_steps = 2
+lr = 1e-5
+no_scheduler = true
+max_grad_norm = 10.0
 loss_coefficient_rec = 0
 loss_coefficient_vsp = 10.0
 loss_coefficient_cc_trans = 10.0
 loss_coefficient_cc_rec = 10.0
 loss_coefficient_cc_vsp = 10.0
+
+[gan]
+disc_lr = 1e-5
+eps = 6.25e-10
+smooth = 0.9
+loss_coefficient_disc = 1.0
 loss_coefficient_gen = 1.0
 loss_coefficient_latent_gen = 0.1
-loss_coefficient_disc = 1.0
 loss_coefficient_similarity_gen = 0.0
-add_noise = 0
-add_noise_rotation = 0
-force_dump = true
-overwrite = false
-freeze_params = false
-patience = 25
-delta = 0.0
-use_small_output_adapters = false
-use_residual_adapters = true
-no_scheduler = true
+
+[eval]
+val_size = 32768
+val_bs = 1024
 top_k_size = 1024
-heatmap_size = 64
-k = 16
-finetune_mode = false
-gan_style = "vanilla"
 top_k_batches = 16
+k = 16
+heatmap_size = 64
 
 [logging]
+use_wandb = true
 wandb_project = 'unsupervised_disc'
 wandb_name = 'unsupervised'
 load_dir = './finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
 save_dir = './finetuning_unsupervised/{}/'
-
-
-[discriminator]
-smooth = 0.9
-disc_dim = 512
-disc_depth = 4
-disc_lr = 1e-5
-eps = 6.25e-10
-use_residual = true
+force_dump = true
 
 # python train.py unsupervised --num_points 100000 --epochs 2000 --seed 5

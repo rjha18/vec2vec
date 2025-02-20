@@ -55,8 +55,6 @@ def load_n_translator(cfg, encoder_dims):
             nn.ReLU(),
             nn.Linear(cfg.latent_dims, cfg.d_adapter)
         )
-    elif cfg.style == 'n_bert':
-        transform = LMTransform(cfg.d_adapter, cfg.d_adapter, cfg.lm_base_name, cfg.upscale_num)
     elif cfg.style == 'unet':
         transform = UNetTransform(cfg.d_adapter, cfg.d_adapter)
     elif cfg.style == 'unet1d':
