@@ -83,9 +83,18 @@ def embed(x, encoder, tokenizer, max_length=32, device='cpu'):
         'text_embeddings': embeddings
     }
 
-def forward_embedding_sentence_transformers(enc, features, normalize_embeddings: bool = True):
+def forward_embedding_sentence_transformers(enc, features, normalize_embeddings: bool = True, mixed_precision: str = None):
     output_value  = "sentence_embedding"
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+    if mixed_precision is not None:
+        if mixed_precision == 'bf16':
+            enc_type = torch.bfloat16
+        elif mixed_precision == 'fp16':
+            enc_type = torch.float16
+        else:
+            raise ValueError(f"Unknown mixed precision flag {mixed_precision}")
+    else:
+        enc_type = torch.float32
+    with torch.no_grad(), torch.autocast("cuda", dtype=enc_type):
         out_features = enc.forward(features)
     embeddings = out_features[output_value]
     embeddings = embeddings.detach()

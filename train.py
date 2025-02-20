@@ -1,5 +1,3 @@
-import itertools
-import math
 import os
 import random
 import toml
@@ -10,6 +8,7 @@ import accelerate
 from tqdm import tqdm
 import wandb
 
+import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -18,7 +17,7 @@ from translators.Discriminator import Discriminator
 # from eval import eval_model
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.dist import get_rank, get_world_size
-from utils.eval_utils import EarlyStopper, eval_loop_
+from utils.eval_utils import eval_loop_
 from utils.gan import VanillaGAN, RelativisticGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
@@ -58,7 +57,6 @@ def training_loop_(
                 **process_batch(cfg, sup_batch, sup_encs, device), 
                 **process_batch(cfg, unsup_batch, unsup_enc, device)
             }
-            cfg.noise_level = 1e-5 # TODO argparse
             recons, translations, reps = translator(
                 ins, noise_level=cfg.noise_level, include_reps=True
             )
@@ -195,17 +193,21 @@ def training_loop_(
             if get_rank() == 0:
                 dataloader_pbar.set_postfix(metrics)
 
-        if (i + 1) % cfg.save_every == 0:
-            with open(save_dir + 'config.toml', 'w') as f:
-                toml.dump(cfg.__dict__, f)
-            torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
+    with open(save_dir + 'config.toml', 'w') as f:
+        toml.dump(cfg.__dict__, f)
+    torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
 
-# TODO: change embs to supervised_emb
+
 def main():
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
     cfg = toml.load(f'configs/{argv[1]}.toml')
     unknown_cfg = read_args(argv)
-    cfg = SimpleNamespace(**{**cfg['general'], **cfg['train'], **cfg['discriminator'], **cfg['logging'], **unknown_cfg})
+    cfg = SimpleNamespace(**{**{k: v for d in cfg.values() for k, v in d.items()}, **unknown_cfg})
+
+    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
+        cfg.mixed_precision = 'fp16'
+        cfg.gradient_accumulation_steps = 1
+        print("Note: bf16 is not available on this hardware! Reverting to fp16 and setting accumulation steps to 1.")
 
     # set seeds
     random.seed(cfg.seed + get_rank())
@@ -216,7 +218,7 @@ def main():
     use_val_set = hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
-        mixed_precision=cfg.mixed_precision,
+        mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps
     )
     # https://github.com/huggingface/transformers/issues/26548
@@ -239,7 +241,7 @@ def main():
 
     dset = load_streaming_embeddings(cfg.dataset)
 
-    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision='bf16' == cfg.mixed_precision)}
+    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)}
     encoder_dims = {cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])}
     translator = load_n_translator(cfg, encoder_dims)
 
@@ -248,15 +250,11 @@ def main():
 
     os.makedirs(save_dir, exist_ok=True)
 
-    # if hasattr(cfg, 'freeze_params') and cfg.freeze_params:
-    #     for param in translator.parameters():
-    #         param.requires_grad = False
-
     assert hasattr(cfg, 'unsup_emb')
     assert cfg.sup_emb != cfg.unsup_emb
 
     unsup_enc = {
-        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision='bf16' == cfg.mixed_precision)
+        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
     }
     unsup_dim = {
         cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
@@ -272,6 +270,14 @@ def main():
     print("Number of *trainable* parameters:", sum(p.numel() for p in translator.parameters() if p.requires_grad))
     print("Number of training datapoints:", len(dset))
     print(translator)
+
+    logger = Logger(
+        project=cfg.wandb_project,
+        name=cfg.wandb_name,
+        dummy=(cfg.wandb_project is None) or not (cfg.use_wandb),
+        config=cfg,
+    )
+
     num_workers = get_num_proc()
     print(f"Rank {get_rank()} using {num_workers} workers and {len(dset)} datapoints")
     if get_world_size() > 1:
@@ -279,27 +285,27 @@ def main():
         dset = dset.select(range(max_num_datapoints))
         print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=42)
+    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.dataset_seed)
     dset = dset_dict["train"]
     valset = dset_dict["test"]
     if hasattr(cfg, 'num_points'):
         supset = dset.shuffle(seed=cfg.seed + 1).select(range(cfg.num_points))
         unsupset = dset.shuffle(seed=cfg.seed + 2).select(range(cfg.num_points))
-    
+
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
         encoders=sup_encs,
         n_embs_per_batch=cfg.n_embs_per_batch,
         batch_size=cfg.bs,
-        max_length=cfg.max_seq_length, 
+        max_length=cfg.max_seq_length,
         seed=cfg.seed,
     )
     unsupset = MultiencoderTokenizedDataset(
         dataset=unsupset,
         encoders=unsup_enc,
-        n_embs_per_batch=1, 
+        n_embs_per_batch=1,
         batch_size=cfg.bs,
-        max_length=cfg.max_seq_length, 
+        max_length=cfg.max_seq_length,
         seed=cfg.seed,
     )
 
@@ -328,9 +334,9 @@ def main():
         valset = MultiencoderTokenizedDataset(
             dataset=valset,
             encoders={ **unsup_enc, **sup_encs },
-            n_embs_per_batch=2, 
+            n_embs_per_batch=2,
             batch_size=cfg.val_bs,
-            max_length=cfg.max_seq_length, 
+            max_length=cfg.max_seq_length,
             seed=cfg.seed,
         )
         valloader = DataLoader(
@@ -345,36 +351,19 @@ def main():
         )
         valloader = accelerator.prepare(valloader)
 
-    max_num_epochs = int(math.ceil(cfg.epochs))
-
     opt = torch.optim.AdamW(translator.parameters(), lr=cfg.lr, fused=False, weight_decay=0.00)
-    steps_per_epoch = len(supset) // cfg.bs
-    total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
-    if not hasattr(cfg, 'no_scheduler') or not cfg.no_scheduler:
-        # linear
-        scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
-    else:
-        # constant with warmup
-        warmup_length = 2000 * get_world_size()
-        def lr_lambda(step):
-            if step < warmup_length:
-                return min(1, step / warmup_length)
-            else:
-                return 1
-        scheduler = LambdaLR(opt, lr_lambda=lr_lambda) 
-    
     
     ######################################################################################
     disc = Discriminator(
         latent_dim=translator.in_adapters[cfg.unsup_emb].in_dim,
-        discriminator_dim=cfg.disc_dim, 
-        depth=cfg.disc_depth, 
+        discriminator_dim=cfg.disc_dim,
+        depth=cfg.disc_depth,
+        weight_init=cfg.weight_init
     )
     disc_opt = torch.optim.AdamW(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, weight_decay=0.00)
 
     cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
-    print(disc)
     ######################################################################################
     sup_disc = Discriminator(
         latent_dim=translator.in_adapters[cfg.sup_emb].in_dim,
@@ -388,41 +377,64 @@ def main():
     print(sup_disc)
     ######################################################################################
     latent_disc = Discriminator(
-        latent_dim=cfg.d_adapter, 
-        discriminator_dim=cfg.disc_dim, 
-        depth=cfg.disc_depth, 
+        latent_dim=cfg.d_adapter,
+        discriminator_dim=cfg.disc_dim,
+        depth=cfg.disc_depth,
+        weight_init=cfg.weight_init
     )
+    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
     print(latent_disc)
     latent_disc_opt = torch.optim.AdamW(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, weight_decay=0.00)
     ######################################################################################
     similarity_disc = Discriminator(
-        latent_dim=cfg.bs, 
-        discriminator_dim=cfg.disc_dim, 
+        latent_dim=cfg.bs,
+        discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
+        weight_init=cfg.weight_init
     )
+    similarity_disc_opt = torch.optim.RMSprop(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
     cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
     print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
     print(similarity_disc)
     similarity_disc_opt = torch.optim.AdamW(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, weight_decay=0.00)
     ######################################################################################
+
+    max_num_epochs = int(np.ceil(cfg.epochs))
+    steps_per_epoch = len(supset) // cfg.bs
+    total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
+    warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100) * get_world_size()
+
+    def lr_lambda(step):
+        if step < warmup_length:
+            return min(1, step / warmup_length)
+        else:
+            if hasattr(cfg, 'no_scheduler') and cfg.no_scheduler:
+                return 1
+            return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
+
+    scheduler = LambdaLR(opt, lr_lambda=lr_lambda)
+    disc_scheduler = LambdaLR(disc_opt, lr_lambda=lr_lambda)
+    sup_disc_scheduler = LambdaLR(sup_disc_opt, lr_lambda=lr_lambda)
+    latent_disc_scheduler = LambdaLR(latent_disc_opt, lr_lambda=lr_lambda)
+    similarity_disc_scheduler = LambdaLR(similarity_disc_opt, lr_lambda=lr_lambda)
+
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
         print(f"Loading models from {cfg.load_dir}...")
         translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
         disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
 
-    translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt, sup_disc, sup_disc_opt, latent_disc, latent_disc_opt, similarity_disc, similarity_disc_opt = accelerator.prepare(
-        translator, opt, scheduler, sup_dataloader, unsup_dataloader, disc, disc_opt, sup_disc, sup_disc_opt, latent_disc, latent_disc_opt, similarity_disc, similarity_disc_opt
-    )
+    translator, opt, scheduler = accelerator.prepare(translator, opt, scheduler)
+    disc, disc_opt, disc_scheduler = accelerator.prepare(disc, disc_opt, disc_scheduler)
+    sup_disc, sup_disc_opt, sup_disc_scheduler = accelerator.prepare(sup_disc, sup_disc_opt, sup_disc_scheduler)
+    latent_disc, latent_disc_opt, latent_disc_scheduler = accelerator.prepare(latent_disc, latent_disc_opt, latent_disc_scheduler)
+    similarity_disc, similarity_disc_opt, similarity_disc_scheduler = accelerator.prepare(similarity_disc, similarity_disc_opt, similarity_disc_scheduler)
+    sup_dataloader, unsup_dataloader = accelerator.prepare(sup_dataloader, unsup_dataloader)
 
     best_model = None
     best_disc = None
-    early_stopper = EarlyStopper(
-        patience=cfg.patience if hasattr(cfg, 'patience') else 1,
-        min_delta=cfg.delta if hasattr(cfg, 'delta') else 0
-    )
 
     if cfg.gan_style == "vanilla":
         gan_cls = VanillaGAN
@@ -435,27 +447,31 @@ def main():
         generator=translator,
         discriminator=latent_disc,
         discriminator_opt=latent_disc_opt,
-        accelerator=accelerator
+        discriminator_scheduler=latent_disc_scheduler,
+        accelerator=accelerator,
     )
     similarity_gan = gan_cls(
         cfg=cfg,
         generator=translator,
         discriminator=similarity_disc,
         discriminator_opt=similarity_disc_opt,
-        accelerator=accelerator
+        discriminator_scheduler=similarity_disc_scheduler,
+        accelerator=accelerator,
     )
     gan = gan_cls(
         cfg=cfg,
         generator=translator,
         discriminator=disc,
         discriminator_opt=disc_opt,
-        accelerator=accelerator
+        discriminator_scheduler=disc_scheduler,
+        accelerator=accelerator,
     )
     sup_gan = gan_cls(
         cfg=cfg,
         generator=translator,
         discriminator=sup_disc,
         discriminator_opt=sup_disc_opt,
+        discriminator_scheduler=sup_disc_scheduler,
         accelerator=accelerator
     )
     for epoch in range(max_num_epochs):
@@ -475,11 +491,13 @@ def main():
                                 continue
                             val_res[f"val/{flag}_{target_flag}_{k}"] = v
 
-                if heatmap_dict is not None:
+                if len(heatmap_dict) > 0:
                     for k,v in heatmap_dict.items():
                         if k in ["heatmap", "heatmap_softmax"]:
                             v = wandb.Image(v)
-                        val_res[f"val/{k}"] = v
+                            val_res[f"val/{k}"] = v
+                        else:
+                            val_res[f"val/{k} (avg. {cfg.top_k_batches} batches)"] = v
                 wandb.log(val_res)
                 translator.train()
 
@@ -516,14 +534,6 @@ def main():
     torch.save(best_model, model_save_dir)
     torch.save(best_disc, disc_save_dir)
 
-    # # eval
-    # cfg.use_good_queries = 1
-    # cfg.dataset = "NanoNQ"
-    # cfg.max_seq_length = cfg.max_seq_length
-    # cfg.batch_size = cfg.bs
-    # cfg.train_path = save_dir
-    # metrics = eval_model(cfg=cfg, translator=translator)
-    # wandb.log({ f"eval/k": v for k,v in metrics.items() })
 
 if __name__ == "__main__":
     main()

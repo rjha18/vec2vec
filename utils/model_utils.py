@@ -22,15 +22,22 @@ HF_FLAGS = {
 }
 
 
-def load_encoder(model_flag, device: str = 'cpu', max_seq_length: int = 32, mixed_precision: bool = False):
+def load_encoder(model_flag, device: str = 'cpu', max_seq_length: int = 32, mixed_precision: str = None):
     if model_flag in HF_FLAGS:
         f = HF_FLAGS[model_flag]
     else:
         f = model_flag
 
     model_kwargs = {}
-    if mixed_precision:
-        model_kwargs['torch_dtype'] = torch.bfloat16
+    if mixed_precision is not None:
+        if mixed_precision == 'bf16':
+            model_kwargs['torch_dtype'] = torch.bfloat16
+        elif mixed_precision == 'fp16':
+            model_kwargs['torch_dtype'] = torch.float16
+        else:
+            raise ValueError(f"Unknown mixed precision flag {mixed_precision}")
+    else:
+        model_kwargs['torch_dtype'] = torch.float32
     
     encoder = SentenceTransformer(f, device=device, trust_remote_code=True, model_kwargs=model_kwargs)
     encoder.max_seq_length = max_seq_length

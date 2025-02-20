@@ -12,6 +12,7 @@ class VanillaGAN:
     generator: torch.nn.Module
     discriminator: torch.nn.Module
     discriminator_opt: torch.optim.Optimizer
+    discriminator_scheduler: torch.optim.lr_scheduler._LRScheduler
     accelerator: accelerate.Accelerator
 
     @property
@@ -56,6 +57,7 @@ class VanillaGAN:
             self.cfg.max_grad_norm
         )
         self.discriminator_opt.step()
+        self.discriminator_scheduler.step()
         return r1_penalty.detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
 
     def _step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
