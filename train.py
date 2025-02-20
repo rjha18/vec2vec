@@ -65,13 +65,13 @@ def training_loop_(
 
             # discriminator
             disc_r1_penalty, disc_loss, gen_loss, disc_acc_real, disc_acc_fake, gen_acc = gan.step(
-                real_data=ins[cfg.unsup_emb],
-                fake_data=translations[cfg.unsup_emb][cfg.sup_emb],
+                real_data=ins[cfg.unsup_emb] + torch.randn_like(ins[cfg.unsup_emb], device=ins[cfg.unsup_emb].device) * cfg.noise_level,
+                fake_data=translations[cfg.unsup_emb][cfg.sup_emb] + torch.randn_like(translations[cfg.unsup_emb][cfg.sup_emb], device=translations[cfg.unsup_emb][cfg.sup_emb].device) * cfg.noise_level
             )
 
             sup_disc_r1_penalty, sup_disc_loss, sup_gen_loss, sup_disc_acc_real, sup_disc_acc_fake, sup_gen_acc = sup_gan.step(
-                real_data=ins[cfg.sup_emb],
-                fake_data=translations[cfg.sup_emb][cfg.unsup_emb],
+                real_data=ins[cfg.sup_emb] + torch.randn_like(ins[cfg.sup_emb], device=ins[cfg.sup_emb].device) * cfg.noise_level,
+                fake_data=translations[cfg.sup_emb][cfg.unsup_emb] + torch.randn_like(translations[cfg.sup_emb][cfg.unsup_emb], device=translations[cfg.sup_emb][cfg.unsup_emb].device) * cfg.noise_level,
             )
 
             # latent discriminator
@@ -355,7 +355,7 @@ def main():
         scheduler = LambdaLR(opt, lr_lambda=lambda step: 1 - step / max(1, total_steps))
     else:
         # constant with warmup
-        warmup_length = 100 * get_world_size()
+        warmup_length = 2000 * get_world_size()
         def lr_lambda(step):
             if step < warmup_length:
                 return min(1, step / warmup_length)
@@ -370,7 +370,7 @@ def main():
         discriminator_dim=cfg.disc_dim, 
         depth=cfg.disc_depth, 
     )
-    disc_opt = torch.optim.AdamW(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    disc_opt = torch.optim.AdamW(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, weight_decay=0.00)
 
     cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
@@ -381,7 +381,7 @@ def main():
         discriminator_dim=cfg.disc_dim, 
         depth=cfg.disc_depth, 
     )
-    sup_disc_opt = torch.optim.AdamW(sup_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    sup_disc_opt = torch.optim.AdamW(sup_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, weight_decay=0.00)
 
     cfg.num_sup_disc_params = sum(x.numel() for x in sup_disc.parameters())
     print(f"Number of supervised discriminator parameters:", cfg.num_sup_disc_params)
@@ -395,7 +395,7 @@ def main():
     cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
     print(latent_disc)
-    latent_disc_opt = torch.optim.AdamW(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    latent_disc_opt = torch.optim.AdamW(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, weight_decay=0.00)
     ######################################################################################
     similarity_disc = Discriminator(
         latent_dim=cfg.bs, 
@@ -405,7 +405,7 @@ def main():
     cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
     print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
     print(similarity_disc)
-    similarity_disc_opt = torch.optim.AdamW(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
+    similarity_disc_opt = torch.optim.AdamW(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, weight_decay=0.00)
     ######################################################################################
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')

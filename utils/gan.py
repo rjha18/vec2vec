@@ -49,7 +49,7 @@ class VanillaGAN:
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(
-            disc_loss + (r1_penalty * 0.1)  * self.cfg.loss_coefficient_disc
+            disc_loss + (r1_penalty * 1.0)  * self.cfg.loss_coefficient_disc
         )
         self.accelerator.clip_grad_norm_(
             self.discriminator.parameters(),
