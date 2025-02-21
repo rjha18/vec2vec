@@ -54,7 +54,7 @@ class VanillaGAN:
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(
-            disc_loss + (r1_penalty * 1.0)  * self.cfg.loss_coefficient_disc
+            (disc_loss + (r1_penalty * 0.01) ) * self.cfg.loss_coefficient_disc
         )
         self.accelerator.clip_grad_norm_(
             self.discriminator.parameters(),
@@ -114,18 +114,18 @@ class LeastSquaresGAN(VanillaGAN):
         batch_size = d_real_logits.size(0)
         real_labels = torch.ones((batch_size, 1), device=device) * (1 - self.cfg.smooth)
         fake_labels = torch.ones((batch_size, 1), device=device) * self.cfg.smooth
-        disc_loss_real = F.mse_loss(d_real_logits, real_labels)
-        disc_loss_fake = F.mse_loss(d_fake_logits, fake_labels)
+        disc_loss_real = (d_real_logits ** 2).mean() # F.mse_loss(d_real_logits ** 2, real_labels)
+        disc_loss_fake = ((d_fake_logits - 1) ** 2).mean() #F.mse_loss(d_fake_logits ** 2, fake_labels)
         disc_loss = (disc_loss_real + disc_loss_fake) / 2
-        disc_acc_real = (d_real_logits.sigmoid() < 0.5).float().mean().item()
-        disc_acc_fake = (d_fake_logits.sigmoid() > 0.5).float().mean().item()
+        disc_acc_real = ((d_real_logits ** 2) < 0.5).float().mean().item()
+        disc_acc_fake = ((d_fake_logits ** 2) > 0.5).float().mean().item()
 
         r1_penalty = self.compute_gradient_penalty(real_data)
 
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(
-            disc_loss + (r1_penalty * 1.0)  * self.cfg.loss_coefficient_disc
+            (disc_loss + (r1_penalty * 0.01))  * self.cfg.loss_coefficient_disc
         )
         self.accelerator.clip_grad_norm_(
             self.discriminator.parameters(),
@@ -139,10 +139,11 @@ class LeastSquaresGAN(VanillaGAN):
         d_fake_logits = self.discriminator(fake_data)
         device = fake_data.device
         batch_size = fake_data.size(0)
-        real_labels = torch.zeros((batch_size, 1), device=device)
-        gen_loss = F.mse_loss(d_fake_logits, real_labels)
-        gen_acc = (d_fake_logits.sigmoid() < 0.5).float().mean().item()
-        return gen_loss, gen_acc
+        # real_labels = torch.zeros((batch_size, 1), device=device)
+        gen_loss = ((d_fake_logits) ** 2).mean() # F.mse_loss(d_fake_logits ** 2, real_labels)
+        gen_acc = ((d_fake_logits ** 2) < 0.5).float().mean().item()
+        return gen_loss * 0.5, gen_acc
+
 
 class RelativisticGAN(VanillaGAN):
     def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float, float]:
