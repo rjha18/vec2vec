@@ -75,6 +75,7 @@ class MLPWithResidual(nn.Module):
     def initialize_weights(self, weight_init: str):
         for module in self.modules():
             if isinstance(module, nn.Linear):
+                print("initializing", type(module))
                 if weight_init == 'kaiming':
                     torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
                 elif weight_init == 'xavier':
@@ -84,6 +85,12 @@ class MLPWithResidual(nn.Module):
                 else:
                     raise ValueError(f"Unknown weight initialization: {weight_init}")
                 module.bias.data.fill_(0)
+            elif isinstance(module, nn.BatchNorm1d):
+                torch.nn.init.normal_(module.weight, mean=1.0, std=0.02)
+                torch.nn.init.normal_(module.bias, mean=0.0, std=0.02) 
+            elif isinstance(module, nn.LayerNorm):
+                torch.nn.init.constant_(module.bias, 0)
+                torch.nn.init.constant_(module.weight, 1.0)
          
     def forward(self, x):
         for layer in self.layers:
