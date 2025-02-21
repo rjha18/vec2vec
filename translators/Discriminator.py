@@ -12,12 +12,12 @@ class Discriminator(nn.Module):
         if depth >= 2:
             layers = []
             layers.append(nn.Linear(latent_dim, discriminator_dim))
-            layers.append(nn.Dropout(0.01))
+            layers.append(nn.Dropout(0.2))
             for _ in range(depth - 2):
                 layers.append(nn.SiLU())
                 layers.append(nn.Linear(discriminator_dim, discriminator_dim))
                 layers.append(nn.LayerNorm(discriminator_dim))
-                layers.append(nn.Dropout(0.01))
+                layers.append(nn.Dropout(0.2))
             layers.append(nn.SiLU())
             layers.append(nn.Linear(discriminator_dim, 1))
             self.layers.append(nn.Sequential(*layers))
