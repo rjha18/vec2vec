@@ -285,12 +285,12 @@ def main():
         dset = dset.select(range(max_num_datapoints))
         print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.dataset_seed)
+    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
     dset = dset_dict["train"]
     valset = dset_dict["test"]
     if hasattr(cfg, 'num_points'):
-        supset = dset.shuffle(seed=cfg.seed + 1).select(range(cfg.num_points))
-        unsupset = dset.shuffle(seed=cfg.seed + 2).select(range(cfg.num_points))
+        supset = dset.shuffle(seed=cfg.train_dataset_seed + 1).select(range(cfg.num_points))
+        unsupset = dset.shuffle(seed=cfg.train_dataset_seed + 2).select(range(cfg.num_points))
 
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
