@@ -1,6 +1,8 @@
 [general]
 seed = 0
-dataset_seed = 42
+train_dataset_seed = 10
+val_dataset_seed = 42
+
 normalize_embeddings = true
 mixed_precision = 'bf16'
 weight_init = 'orthogonal'
@@ -68,5 +70,3 @@ wandb_name = 'unsupervised'
 load_dir = './finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
 save_dir = './finetuning_unsupervised/{}/'
 force_dump = true
-
-# python train.py unsupervised --num_points 100000 --epochs 2000 --seed 5
