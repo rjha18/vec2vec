@@ -37,6 +37,9 @@ class Discriminator(nn.Module):
                 else:
                     raise ValueError(f"Unknown weight initialization: {weight_init}")
                 module.bias.data.fill_(0)
+            elif isinstance(module, nn.LayerNorm):
+                torch.nn.init.constant_(module.bias, 0)
+                torch.nn.init.constant_(module.weight, 1.0)
 
     def forward(self, x):
         for layer in self.layers:
