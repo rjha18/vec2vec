@@ -241,8 +241,12 @@ def main():
 
     dset = load_streaming_embeddings(cfg.dataset)
 
-    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)}
-    encoder_dims = {cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])}
+    sup_encs = {
+        cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
+    }
+    encoder_dims = {
+        cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])
+    }
     translator = load_n_translator(cfg, encoder_dims)
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
@@ -289,8 +293,8 @@ def main():
     dset = dset_dict["train"]
     valset = dset_dict["test"]
     if hasattr(cfg, 'num_points'):
-        supset = dset.shuffle(seed=cfg.train_dataset_seed + 1).select(range(cfg.num_points))
-        unsupset = dset.shuffle(seed=cfg.train_dataset_seed + 2).select(range(cfg.num_points))
+        supset = dset.shuffle(seed=cfg.train_dataset_seed + 1).select(range(min(cfg.num_points, len(dset))))
+        unsupset = dset.shuffle(seed=cfg.train_dataset_seed + 2).select(range(min(cfg.num_points, len(dset))))
 
     supset = MultiencoderTokenizedDataset(
         dataset=supset,

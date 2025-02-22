@@ -57,7 +57,7 @@ loss_coefficient_latent_gen = 0.1
 loss_coefficient_similarity_gen = 0.0
 
 [eval]
-val_size = 32768
+val_size = 4096
 val_bs = 1024
 top_k_size = 1024
 top_k_batches = 16

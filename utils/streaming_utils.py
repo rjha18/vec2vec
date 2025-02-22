@@ -49,6 +49,28 @@ def load_streaming_embeddings(
         dset = load_dataset("HuggingFaceFW/fineweb", "sample-10BT", streaming=streaming, num_proc=8)["train"]
     elif dataset_name == "nq-corpus":
         dset = load_dataset("BeIR/nq", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "arguana-corpus":
+        dset = load_dataset("BeIR/arguana", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "arguana-queries":
+        dset = load_dataset("BeIR/arguana", "queries", streaming=streaming, num_proc=8)["queries"]
+    elif dataset_name == "fiqa-corpus":
+        dset = load_dataset("BeIR/fiqa", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "fiqa-queries":
+        dset = load_dataset("BeIR/fiqa", "queries", streaming=streaming, num_proc=8)["queries"]
+    elif dataset_name == "quora-corpus":
+        dset = load_dataset("BeIR/quora", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "quora-queries":
+        dset = load_dataset("BeIR/quora", "queries", streaming=streaming, num_proc=8)["queries"]
+    elif dataset_name == "trec-covid-corpus":
+        dset = load_dataset("BeIR/trec-covid", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "trec-covid-queries":
+        dset = load_dataset("BeIR/trec-covid", "queries", streaming=streaming, num_proc=8)["queries"]
+    elif dataset_name == "fever-corpus":
+        dset = load_dataset("BeIR/fever", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "fever-queries":
+        dset = load_dataset("BeIR/fever", "queries", streaming=streaming, num_proc=8)["queries"]
+    elif dataset_name == "scifact-corpus":
+        dset = load_dataset("BeIR/scifact", "corpus", streaming=streaming, num_proc=8)["corpus"]
     elif dataset_name == "retrieval":
         dset = _load_retrieval_dataset()
     else:
