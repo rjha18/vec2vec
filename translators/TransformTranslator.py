@@ -17,9 +17,8 @@ class TransformTranslator(AbsNTranslator):
         weight_init: str = 'kaiming',
         depth: int = 3,
         normalize_embeddings: bool = True,
-        style: str = 'unet',
+        norm_style: str = 'layer',
         use_small_output_adapters: bool = False,
-        norm_style: str = 'batch',
     ):
         super().__init__(encoder_dims, d_adapter, depth)
 
@@ -33,7 +32,6 @@ class TransformTranslator(AbsNTranslator):
             self.in_adapters[flag] = in_adapter
             self.out_adapters[flag] = out_adapter
         self.normalize_embeddings = normalize_embeddings
-        self.style = style
 
     def translate_embeddings(
         self, embeddings: torch.Tensor, in_name: str, out_name: str,
@@ -74,18 +72,20 @@ class TransformTranslator(AbsNTranslator):
         in_set: set[str] = None,
         out_set: set[str] = None,
         include_reps: bool = False,
+        noise_level: float = 0.0,
     ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         in_set = in_set if in_set is not None else ins.keys()
         out_set = out_set if out_set is not None else ins.keys()
 
         recons = {}
-        translations = {
-            flag: {} for flag in out_set
-        }
+        translations = {}
         reps = recons.copy()
 
         for flag in in_set:
             noisy_emb = ins[flag]
+            if self.training and noise_level > 0.0:
+                noisy_emb += torch.randn_like(noisy_emb, device=noisy_emb.device) * noise_level
+                noisy_emb = noisy_emb / noisy_emb.norm(p=2, dim=1, keepdim=True) # TODO check bool
             noisy_rep = self._get_latents(noisy_emb, self.in_adapters[flag])
             if include_reps:
                 reps[flag] = noisy_rep
@@ -93,6 +93,7 @@ class TransformTranslator(AbsNTranslator):
                 if target_flag == flag:
                     recons[flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
                 else:
+                    if target_flag not in translations: translations[target_flag] = {}
                     translations[target_flag][flag] = self._out_project(noisy_rep, self.out_adapters[target_flag])
 
         if include_reps:

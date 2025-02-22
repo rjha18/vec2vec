@@ -1,23 +1,28 @@
 import torch
 import torch.nn as nn
 
+
 class Discriminator(nn.Module):
     def __init__(self, latent_dim, discriminator_dim: int = 1024, depth: int = 3, weight_init: str = 'kaiming'):
         super().__init__()
         self.latent_dim = latent_dim
 
         assert depth >= 1, "Depth must be at least 1"
-        layers = []
+        self.layers = nn.ModuleList()
         if depth >= 2:
+            layers = []
             layers.append(nn.Linear(latent_dim, discriminator_dim))
+            layers.append(nn.Dropout(0.2))
             for _ in range(depth - 2):
                 layers.append(nn.SiLU())
                 layers.append(nn.Linear(discriminator_dim, discriminator_dim))
+                layers.append(nn.LayerNorm(discriminator_dim))
+                layers.append(nn.Dropout(0.2))
             layers.append(nn.SiLU())
             layers.append(nn.Linear(discriminator_dim, 1))
+            self.layers.append(nn.Sequential(*layers))
         else:
             layers.append(nn.Linear(latent_dim, 1))
-        self.discriminator = nn.Sequential(*layers)
         self.initialize_weights(weight_init)
     
     def initialize_weights(self, weight_init: str):
@@ -32,7 +37,11 @@ class Discriminator(nn.Module):
                 else:
                     raise ValueError(f"Unknown weight initialization: {weight_init}")
                 module.bias.data.fill_(0)
+            elif isinstance(module, nn.LayerNorm):
+                torch.nn.init.constant_(module.bias, 0)
+                torch.nn.init.constant_(module.weight, 1.0)
 
     def forward(self, x):
-        output = self.discriminator(x)
-        return output
+        for layer in self.layers:
+            x = layer(x)
+        return x
