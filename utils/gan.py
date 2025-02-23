@@ -125,7 +125,7 @@ class LeastSquaresGAN(VanillaGAN):
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(
-            (disc_loss + (r1_penalty * self.cfg.loss_coefficient_r1_penalty))  * self.cfg.loss_coefficient_disc
+            (disc_loss + (r1_penalty * self.cfg.loss_coefficient_r1_penalty)) * self.cfg.loss_coefficient_disc
         )
         self.accelerator.clip_grad_norm_(
             self.discriminator.parameters(),
@@ -139,8 +139,7 @@ class LeastSquaresGAN(VanillaGAN):
         d_fake_logits = self.discriminator(fake_data)
         device = fake_data.device
         batch_size = fake_data.size(0)
-        # real_labels = torch.zeros((batch_size, 1), device=device)
-        gen_loss = ((d_fake_logits) ** 2).mean() # F.mse_loss(d_fake_logits ** 2, real_labels)
+        gen_loss = ((d_fake_logits) ** 2).mean()
         gen_acc = ((d_fake_logits ** 2) < 0.5).float().mean().item()
         return gen_loss * 0.5, gen_acc
 
