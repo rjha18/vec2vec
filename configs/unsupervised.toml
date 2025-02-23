@@ -11,8 +11,6 @@ unsup_emb = 'gte'
 sup_emb = 'gtr'
 n_embs_per_batch = 1
 finetune_mode = false
-noise_level = 1e-5
-loss_coefficient_r1_penalty = 0.01
 
 [translator]
 style = 'res_mlp'
@@ -36,13 +34,15 @@ bs = 256
 gradient_accumulation_steps = 1
 lr = 2e-5
 no_scheduler = true
-max_grad_norm = 10.0
+max_grad_norm = 1000.0
 loss_coefficient_reverse_rec = 0.0
 loss_coefficient_rec = 1.0
 loss_coefficient_vsp = 1.0
 loss_coefficient_cc_trans = 10.0
 loss_coefficient_cc_rec = 0.0
 loss_coefficient_cc_vsp = 10.0
+loss_coefficient_r1_penalty = 0.0
+noise_level = 0.0
 warmup_length = 2000
 
 [gan]
