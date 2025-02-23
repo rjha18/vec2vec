@@ -1,10 +1,9 @@
 [general]
-seed = 0
+seed = 5
 train_dataset_seed = 10
 val_dataset_seed = 42
-
 normalize_embeddings = true
-mixed_precision = 'bf16'
+mixed_precision = 'fp16'
 weight_init = 'kaiming'
 dataset = "nq"
 max_seq_length = 64
@@ -19,31 +18,30 @@ loss_coefficient_r1_penalty = 0.01
 style = 'res_mlp'
 norm_style = 'batch'
 depth = 3
-transform_depth = 5
-d_adapter = 512
+transform_depth = 4
+d_adapter = 1024
 d_hidden = 1024
-d_transform = 768
+d_transform = 1024
 use_small_output_adapters = false
 use_residual_adapters = true
 
 [discriminator]
-gan_style = "vanilla"
-disc_depth = 4
-disc_dim = 512
+gan_style = "least_squares"
+disc_depth = 5
+disc_dim = 1024
 use_residual = true
 
 [train]
-epochs = 10
-bs = 128
+bs = 256
 gradient_accumulation_steps = 1
-lr = 1e-5
+lr = 2e-5
 no_scheduler = true
 max_grad_norm = 10.0
 loss_coefficient_reverse_rec = 0.0
-loss_coefficient_rec = 0
-loss_coefficient_vsp = 10.0
+loss_coefficient_rec = 1.0
+loss_coefficient_vsp = 0.0
 loss_coefficient_cc_trans = 10.0
-loss_coefficient_cc_rec = 10.0
+loss_coefficient_cc_rec = 0.0
 loss_coefficient_cc_vsp = 10.0
 warmup_length = 2000
 
@@ -53,7 +51,7 @@ eps = 6.25e-10
 smooth = 0.9
 loss_coefficient_disc = 1.0
 loss_coefficient_gen = 1.0
-loss_coefficient_latent_gen = 0.1
+loss_coefficient_latent_gen = 1.0
 loss_coefficient_similarity_gen = 0.0
 
 [eval]
