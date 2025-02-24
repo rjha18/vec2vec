@@ -80,11 +80,17 @@ def training_loop_(
 
             # similarity discriminator
             if cfg.loss_coefficient_similarity_gen > 0:
-                real_sims = ins[cfg.sup_emb] @ ins[cfg.sup_emb].T
-                fake_sims = translations[cfg.sup_emb][cfg.unsup_emb] @ translations[cfg.sup_emb][cfg.unsup_emb].T
+                real_sims_A = ins[cfg.sup_emb] @ ins[cfg.sup_emb].T
+                fake_sims_A = (
+                    translations[cfg.sup_emb][cfg.unsup_emb] @ translations[cfg.sup_emb][cfg.unsup_emb].T
+                )
+                real_sims_B = ins[cfg.unsup_emb] @ ins[cfg.unsup_emb].T
+                fake_sims_B = (
+                    translations[cfg.unsup_emb][cfg.sup_emb] @ translations[cfg.unsup_emb][cfg.sup_emb].T
+                )
                 similarity_r1_penalty, similarity_disc_loss, similarity_gen_loss, similarity_disc_acc_real, similarity_disc_acc_fake, similarity_gen_acc = similarity_gan.step(
-                    real_data=real_sims,
-                    fake_data=fake_sims,
+                    real_data=torch.cat([real_sims_A, real_sims_B], dim=1),
+                    fake_data=torch.cat([fake_sims_A, fake_sims_B], dim=1)
                 )
             else:
                 similarity_r1_penalty = torch.tensor(0.0)
@@ -393,7 +399,7 @@ def main():
     latent_disc_opt = torch.optim.Adam(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
     ######################################################################################
     similarity_disc = Discriminator(
-        latent_dim=cfg.bs,
+        latent_dim=(cfg.bs * 2),
         discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
         weight_init=cfg.weight_init
@@ -434,7 +440,9 @@ def main():
     disc, disc_opt, disc_scheduler = accelerator.prepare(disc, disc_opt, disc_scheduler)
     sup_disc, sup_disc_opt, sup_disc_scheduler = accelerator.prepare(sup_disc, sup_disc_opt, sup_disc_scheduler)
     latent_disc, latent_disc_opt, latent_disc_scheduler = accelerator.prepare(latent_disc, latent_disc_opt, latent_disc_scheduler)
-    similarity_disc, similarity_disc_opt, similarity_disc_scheduler = accelerator.prepare(similarity_disc, similarity_disc_opt, similarity_disc_scheduler)
+    similarity_disc, similarity_disc_opt, similarity_disc_scheduler = accelerator.prepare(
+        similarity_disc, similarity_disc_opt, similarity_disc_scheduler
+    )
     sup_dataloader, unsup_dataloader = accelerator.prepare(sup_dataloader, unsup_dataloader)
 
     best_model = None

@@ -71,6 +71,12 @@ def load_streaming_embeddings(
         dset = load_dataset("BeIR/fever", "queries", streaming=streaming, num_proc=8)["queries"]
     elif dataset_name == "scifact-corpus":
         dset = load_dataset("BeIR/scifact", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "scifact-queries":
+        dset = load_dataset("BeIR/scifact", "queries", streaming=streaming, num_proc=8)["queries"]
+    elif dataset_name == "msmarco-corpus":
+        dset = load_dataset("BeIR/msmarco", "corpus", streaming=streaming, num_proc=8)["corpus"]
+    elif dataset_name == "msmarco-queries":
+        dset = load_dataset("BeIR/msmarco", "queries", streaming=streaming, num_proc=8)["queries"]
     elif dataset_name == "retrieval":
         dset = _load_retrieval_dataset()
     else:
