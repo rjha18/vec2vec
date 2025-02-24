@@ -19,13 +19,10 @@ class VanillaGAN:
     def _batch_size(self) -> int:
         return self.cfg.bs
     
-    def compute_gradient_penalty(self, real_data: torch.Tensor) -> torch.Tensor:
-        real_data.requires_grad_(True)
-        d_out = self.discriminator(real_data)
-        
+    def compute_gradient_penalty(self, d_out: torch.Tensor, d_in: torch.Tensor) -> torch.Tensor:
         gradients = torch.autograd.grad(
             outputs=d_out.sum(),
-            inputs=real_data,
+            inputs=d_in,
             create_graph=True,
             retain_graph=True,
         )[0]
@@ -37,6 +34,8 @@ class VanillaGAN:
             module.requires_grad = rg
 
     def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, float, float]:
+        real_data = real_data.detach().requires_grad_(True)
+        fake_data = fake_data.detach().requires_grad_(True)
         d_real_logits, d_fake_logits = self.discriminator(real_data), self.discriminator(fake_data)
 
         device = d_real_logits.device
@@ -49,12 +48,16 @@ class VanillaGAN:
         disc_acc_real = (d_real_logits.sigmoid() < 0.5).float().mean().item()
         disc_acc_fake = (d_fake_logits.sigmoid() > 0.5).float().mean().item()
 
-        r1_penalty = self.compute_gradient_penalty(real_data)
+        r1_penalty = self.compute_gradient_penalty(d_out=d_real_logits, d_in=real_data)
+        r2_penalty = self.compute_gradient_penalty(d_out=d_fake_logits, d_in=fake_data)
 
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(
-            (disc_loss + (r1_penalty * self.cfg.loss_coefficient_r1_penalty) ) * self.cfg.loss_coefficient_disc
+            (
+                disc_loss + 
+                ((r1_penalty + r2_penalty) * self.cfg.loss_coefficient_r1_penalty)
+            ) * self.cfg.loss_coefficient_disc
         )
         self.accelerator.clip_grad_norm_(
             self.discriminator.parameters(),
@@ -62,7 +65,7 @@ class VanillaGAN:
         )
         self.discriminator_opt.step()
         self.discriminator_scheduler.step()
-        return r1_penalty.detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
+        return (r1_penalty + r2_penalty).detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
 
     def _step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
         d_fake_logits = self.discriminator(fake_data)
@@ -108,24 +111,26 @@ class VanillaGAN:
 
 class LeastSquaresGAN(VanillaGAN):
     def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, float, float]:
+        real_data = real_data.detach().requires_grad_(True)
+        fake_data = fake_data.detach().requires_grad_(True)
         d_real_logits, d_fake_logits = self.discriminator(real_data), self.discriminator(fake_data)
 
         device = d_real_logits.device
         batch_size = d_real_logits.size(0)
         real_labels = torch.ones((batch_size, 1), device=device) * (1 - self.cfg.smooth)
         fake_labels = torch.ones((batch_size, 1), device=device) * self.cfg.smooth
-        disc_loss_real = (d_real_logits ** 2).mean() # F.mse_loss(d_real_logits ** 2, real_labels)
-        disc_loss_fake = ((d_fake_logits - 1) ** 2).mean() #F.mse_loss(d_fake_logits ** 2, fake_labels)
+        disc_loss_real = (d_real_logits ** 2).mean()
+        disc_loss_fake = ((d_fake_logits - 1) ** 2).mean()
         disc_loss = (disc_loss_real + disc_loss_fake) / 2
         disc_acc_real = ((d_real_logits ** 2) < 0.5).float().mean().item()
         disc_acc_fake = ((d_fake_logits ** 2) > 0.5).float().mean().item()
 
-        r1_penalty = self.compute_gradient_penalty(real_data)
-
+        r1_penalty = self.compute_gradient_penalty(d_out=d_real_logits, d_in=real_data)
+        r2_penalty = self.compute_gradient_penalty(d_out=d_fake_logits, d_in=fake_data)
         self.generator.train()
         self.discriminator_opt.zero_grad()
         self.accelerator.backward(
-            (disc_loss + (r1_penalty * self.cfg.loss_coefficient_r1_penalty)) * self.cfg.loss_coefficient_disc
+            (disc_loss + ((r1_penalty + r2_penalty) * self.cfg.loss_coefficient_r1_penalty)) * self.cfg.loss_coefficient_disc
         )
         self.accelerator.clip_grad_norm_(
             self.discriminator.parameters(),
@@ -133,7 +138,7 @@ class LeastSquaresGAN(VanillaGAN):
         )
         self.discriminator_opt.step()
         self.discriminator_scheduler.step()
-        return r1_penalty.detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
+        return (r1_penalty + r2_penalty).detach(), disc_loss.detach(), disc_acc_real, disc_acc_fake
 
     def _step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
         d_fake_logits = self.discriminator(fake_data)
