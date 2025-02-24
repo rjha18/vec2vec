@@ -11,19 +11,18 @@ import wandb
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
+from torch.utils.data import DataLoader
 
-from translators.Discriminator import Discriminator
-
-# from eval import eval_model
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.dist import get_rank, get_world_size
 from utils.eval_utils import eval_loop_
 from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
-from utils.utils import *
+from utils.utils import load_translator, read_args, exit_on_nan, get_num_proc
 from utils.streaming_utils import load_streaming_embeddings, process_batch
 from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.wandb_logger import Logger
+from translators.Discriminator import Discriminator
 
 
 def training_loop_(
@@ -253,7 +252,7 @@ def main():
     encoder_dims = {
         cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])
     }
-    translator = load_n_translator(cfg, encoder_dims)
+    translator = load_translator(cfg, encoder_dims)
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
     disc_save_dir = os.path.join(save_dir, 'disc.pt')

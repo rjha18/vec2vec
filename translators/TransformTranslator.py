@@ -1,8 +1,10 @@
 import torch
 import random
 from torch import nn
+
 from translators.MLPWithResidual import MLPWithResidual
 from translators.AbsNTranslator import AbsNTranslator
+from utils.utils import load_transform
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -10,10 +12,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class TransformTranslator(AbsNTranslator):
     def __init__(
         self,
+        cfg,
         encoder_dims: dict[str, int],
         d_adapter: int,
         d_hidden: int,
-        transform: nn.Module,
         weight_init: str = 'kaiming',
         depth: int = 3,
         normalize_embeddings: bool = True,
@@ -21,11 +23,11 @@ class TransformTranslator(AbsNTranslator):
         use_small_output_adapters: bool = False,
     ):
         super().__init__(encoder_dims, d_adapter, depth)
-
+        self.cfg = cfg
+        self.transform = load_transform(cfg, encoder_dims)
         self.d_hidden = d_hidden
         self.use_small_output_adapters = use_small_output_adapters
         self.norm_style = norm_style
-        self.transform = transform
         self.weight_init = weight_init
         for flag, dims in encoder_dims.items():
             in_adapter, out_adapter = self._make_adapters(dims)
@@ -49,12 +51,18 @@ class TransformTranslator(AbsNTranslator):
             self.in_adapters[flag] = in_adapter
             self.out_adapters[flag] = out_adapter
 
-    def _make_adapters(self, dims):
-        assert dims is not None
-        return (
-            MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style, weight_init=self.weight_init),
-            MLPWithResidual(self.depth, self.transform.out_dim, self.d_hidden, dims, self.norm_style, weight_init=self.weight_init),
-        )
+    def _make_adapters(self, dims: int) -> tuple[nn.Module, nn.Module]:
+        if self.cfg.style == "mixer":
+            return (
+                MLPMixer(self.depth, dims, self.d_hidden, dims, num_patches=self.cfg.mixer_num_patches, weight_init=self.weight_init),
+                MLPMixer(self.depth, self.transform.out_dim, self.d_hidden, dims, num_patches=self.cfg.mixer_num_patches,  weight_init=self.weight_init),
+            )
+
+        else:
+            return (
+                MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style, weight_init=self.weight_init),
+                MLPWithResidual(self.depth, self.transform.out_dim, self.d_hidden, dims, self.norm_style, weight_init=self.weight_init),
+            )
 
     def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module) -> torch.Tensor:
         z = in_adapter(emb)

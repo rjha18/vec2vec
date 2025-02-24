@@ -12,15 +12,15 @@ from safetensors.torch import load_file
 from utils.embeddings import load_and_process_embeddings_from_idxs
 
 from translators.MLPWithResidual import MLPWithResidual
+from translators.MLPMixer import MLPMixer
 from translators.LinearTranslator import LinearTranslator
-from translators.TransformTranslator import TransformTranslator
 from translators.transforms.UNetTransform import UNetTransform
 from translators.transforms.UNet1dTransform import UNet1dTransform
 
 from vec2text.models import InversionModel
 
 
-def load_n_translator(cfg, encoder_dims):
+def load_transform(cfg, encoder_dims) -> nn.Module:
     if cfg.style == 'linear':
         return LinearTranslator(
             encoder_dims,
@@ -58,14 +58,28 @@ def load_n_translator(cfg, encoder_dims):
         transform = UNetTransform(cfg.d_adapter, cfg.d_adapter)
     elif cfg.style == 'unet1d':
         transform = UNet1dTransform(cfg.d_adapter, cfg.d_adapter)
+    elif cfg.style == 'mixer':
+        transform = MLPMixer(
+            depth=cfg.transform_depth,
+            in_dim=cfg.d_adapter,
+            hidden_dim=cfg.d_transform,
+            out_dim=cfg.d_adapter,
+            num_patches=cfg.mixer_num_patches,
+            weight_init=cfg.weight_init,
+        )
     else:
         raise ValueError(f"Unknown style: {cfg.style}")
+    return transform
 
+
+
+def load_translator(cfg, encoder_dims):
+    from translators.TransformTranslator import TransformTranslator
     return TransformTranslator(
+        cfg=cfg,
         encoder_dims=encoder_dims,
         d_adapter=cfg.d_adapter,
         d_hidden=cfg.d_hidden,
-        transform=transform,
         weight_init=cfg.weight_init,
         depth=cfg.depth,
         use_small_output_adapters=cfg.use_small_output_adapters if hasattr(cfg, 'use_small_output_adapters') else False,
