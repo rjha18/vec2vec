@@ -2,8 +2,9 @@ import torch
 import random
 from torch import nn
 
-from translators.MLPWithResidual import MLPWithResidual
 from translators.AbsNTranslator import AbsNTranslator
+from translators.MLPMixer import MLPMixer
+from translators.MLPWithResidual import MLPWithResidual
 from utils.utils import load_transform
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -54,8 +55,22 @@ class TransformTranslator(AbsNTranslator):
     def _make_adapters(self, dims: int) -> tuple[nn.Module, nn.Module]:
         if self.cfg.style == "mixer":
             return (
-                MLPMixer(self.depth, dims, self.d_hidden, dims, num_patches=self.cfg.mixer_num_patches, weight_init=self.weight_init),
-                MLPMixer(self.depth, self.transform.out_dim, self.d_hidden, dims, num_patches=self.cfg.mixer_num_patches,  weight_init=self.weight_init),
+                MLPMixer(
+                    depth=self.depth, 
+                    in_dim=dims, 
+                    hidden_dim=self.d_hidden, 
+                    out_dim=self.transform.in_dim, 
+                    num_patches=self.cfg.mixer_num_patches, 
+                    weight_init=self.weight_init
+                ),
+                MLPMixer(
+                    depth=self.depth, 
+                    in_dim=self.transform.out_dim, 
+                    hidden_dim=self.d_hidden, 
+                    out_dim=dims, 
+                    num_patches=self.cfg.mixer_num_patches,
+                    weight_init=self.weight_init
+                ),
             )
 
         else:
