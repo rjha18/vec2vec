@@ -302,7 +302,7 @@ def main():
         n_embs_per_batch=cfg.n_embs_per_batch,
         batch_size=cfg.bs,
         max_length=cfg.max_seq_length,
-        seed=cfg.seed,
+        seed=cfg.sampling_seed,
     )
     unsupset = MultiencoderTokenizedDataset(
         dataset=unsupset,
@@ -310,7 +310,7 @@ def main():
         n_embs_per_batch=1,
         batch_size=cfg.bs,
         max_length=cfg.max_seq_length,
-        seed=cfg.seed,
+        seed=cfg.sampling_seed,
     )
 
     sup_dataloader = DataLoader(
@@ -341,7 +341,7 @@ def main():
             n_embs_per_batch=2,
             batch_size=cfg.val_bs,
             max_length=cfg.max_seq_length,
-            seed=cfg.seed,
+            seed=cfg.sampling_seed,
         )
         valloader = DataLoader(
             valset,

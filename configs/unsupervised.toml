@@ -1,5 +1,6 @@
 [general]
 seed = 5
+sampling_seed = 5
 train_dataset_seed = 10
 val_dataset_seed = 42
 normalize_embeddings = true
@@ -58,7 +59,7 @@ loss_coefficient_similarity_gen = 0.0
 val_size = 4096
 val_bs = 1024
 top_k_size = 1024
-top_k_batches = 16
+top_k_batches = 4
 k = 16
 heatmap_size = 64
 

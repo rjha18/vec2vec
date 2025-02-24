@@ -177,7 +177,7 @@ def eval_loop_(
     translation_res = {}
     heatmap_res = {}
 
-    top_k_batches = cfg.top_k_batches if hasattr(cfg, 'top_k_batches') else 0
+    top_k_batches = min(cfg.top_k_batches, len(iter)) if hasattr(cfg, 'top_k_batches') else 0
     with torch.no_grad():
         n = 0
         for i, batch in enumerate(iter):
