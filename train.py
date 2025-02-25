@@ -364,6 +364,7 @@ def main():
     
     ######################################################################################
     disc = Discriminator(
+        cfg=cfg,
         latent_dim=translator.in_adapters[cfg.unsup_emb].in_dim,
         discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
@@ -375,6 +376,7 @@ def main():
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
     ######################################################################################
     sup_disc = Discriminator(
+        cfg=cfg,
         latent_dim=translator.in_adapters[cfg.sup_emb].in_dim,
         discriminator_dim=cfg.disc_dim, 
         depth=cfg.disc_depth, 
@@ -386,6 +388,7 @@ def main():
     print(sup_disc)
     ######################################################################################
     latent_disc = Discriminator(
+        cfg=cfg,
         latent_dim=cfg.d_adapter,
         discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,
@@ -398,6 +401,7 @@ def main():
     latent_disc_opt = torch.optim.Adam(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
     ######################################################################################
     similarity_disc = Discriminator(
+        cfg=cfg,
         latent_dim=(cfg.bs * 2),
         discriminator_dim=cfg.disc_dim,
         depth=cfg.disc_depth,

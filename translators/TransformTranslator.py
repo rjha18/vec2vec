@@ -58,7 +58,7 @@ class TransformTranslator(AbsNTranslator):
                 MLPMixer(
                     depth=self.depth, 
                     in_dim=dims, 
-                    hidden_dim=self.d_hidden, 
+                    hidden_dim=self.d_hidden // self.cfg.mixer_num_patches, 
                     out_dim=self.transform.in_dim, 
                     num_patches=self.cfg.mixer_num_patches, 
                     weight_init=self.weight_init
@@ -66,7 +66,7 @@ class TransformTranslator(AbsNTranslator):
                 MLPMixer(
                     depth=self.depth, 
                     in_dim=self.transform.out_dim, 
-                    hidden_dim=self.d_hidden, 
+                    hidden_dim=self.d_hidden // self.cfg.mixer_num_patches,
                     out_dim=dims, 
                     num_patches=self.cfg.mixer_num_patches,
                     weight_init=self.weight_init
@@ -75,8 +75,22 @@ class TransformTranslator(AbsNTranslator):
 
         else:
             return (
-                MLPWithResidual(self.depth, dims, self.d_hidden, self.transform.in_dim, self.norm_style, weight_init=self.weight_init),
-                MLPWithResidual(self.depth, self.transform.out_dim, self.d_hidden, dims, self.norm_style, weight_init=self.weight_init),
+                MLPWithResidual(
+                    depth=self.depth,
+                    in_dim=dims, 
+                    hidden_dim=self.d_hidden, 
+                    out_dim=self.transform.in_dim, 
+                    norm_style=self.norm_style, 
+                    weight_init=self.weight_init
+                ),
+                MLPWithResidual(
+                    depth=self.depth, 
+                    in_dim=self.transform.out_dim, 
+                    hidden_dim=self.d_hidden, 
+                    out_dim=dims, 
+                    norm_style=self.norm_style, 
+                    weight_init=self.weight_init
+                ),
             )
 
     def _get_latents(self, emb: torch.Tensor, in_adapter: nn.Module) -> torch.Tensor:

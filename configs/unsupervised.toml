@@ -13,7 +13,7 @@ sup_emb = 'gtr'
 n_embs_per_batch = 1
 finetune_mode = false
 noise_level = 0.0
-mixer_num_patches = 8
+mixer_num_patches = 16
 
 [translator]
 style = 'res_mlp'

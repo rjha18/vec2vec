@@ -95,10 +95,6 @@ class MLPMixer(nn.Module):
             num_patches=num_patches, 
             hidden_dim=chn_dim
         )
-        # self.patch = nn.Sequential(
-        #     nn.Conv1d(in_channels, chn_dim, kernel_size=patch_size, stride=patch_size),
-        #     Rearrange('b c w -> b w c')
-        # )
         self.mixer_blocks = nn.Sequential(*[
             MixerBlock(num_patches=num_patches, chn_dim=chn_dim, tok_hid_dim=hidden_dim, chn_hid_dim=chn_dim)
             for _ in range(depth)
