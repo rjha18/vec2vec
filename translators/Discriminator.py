@@ -34,7 +34,10 @@ class Discriminator(nn.Module):
                 num_patches=cfg.mixer_num_patches,
                 weight_init=weight_init,
             )
-        self.output = nn.Linear(latent_dim, 1)
+        self.output = nn.Sequential(
+                nn.LayerNorm(latent_dim),
+                nn.Linear(latent_dim, 1)
+       )
 
     def forward(self, x):
         x = self.backbone(x)
