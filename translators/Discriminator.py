@@ -29,7 +29,7 @@ class Discriminator(nn.Module):
             self.backbone = MLPMixer(
                 depth=cfg.transform_depth,
                 in_dim=latent_dim,
-                hidden_dim=discriminator_dim // cfg.mixer_num_patches,
+                hidden_dim=discriminator_dim,
                 out_dim=latent_dim,
                 num_patches=cfg.mixer_num_patches,
                 weight_init=weight_init,

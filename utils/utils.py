@@ -62,7 +62,7 @@ def load_transform(cfg, encoder_dims) -> nn.Module:
         transform = MLPMixer(
             depth=cfg.transform_depth,
             in_dim=cfg.d_adapter,
-            hidden_dim=cfg.d_transform // cfg.mixer_num_patches,
+            hidden_dim=cfg.d_transform,
             out_dim=cfg.d_adapter,
             num_patches=cfg.mixer_num_patches,
             weight_init=cfg.weight_init,

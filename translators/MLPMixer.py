@@ -20,8 +20,7 @@ class EmbPatches(nn.Module):
         self.patch_size = input_dim // num_patches
         self.patch_weights = nn.Parameter(torch.randn(self.patch_size, hidden_dim))
         self.projection = nn.Sequential(
-            nn.ReLU(),
-            nn.Dropout(0.1),   
+            nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
 
@@ -30,6 +29,7 @@ class EmbPatches(nn.Module):
         patches = torch.einsum('bpd, dh -> bph', patches, self.patch_weights)
         proj = self.projection(patches)
         return proj
+
 
 class MLPBlock(nn.Module):
     def __init__(self, in_dim: int, hidden_dim: int, p: float = 0.1):
@@ -44,7 +44,6 @@ class MLPBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-
 
 
 class MixerBlock(nn.Module):
@@ -76,6 +75,7 @@ class MLPMixer(nn.Module):
             out_dim: int,
             num_patches: int,
             weight_init: str = 'kaiming',
+            p: float = 0.1,
         ):
         super().__init__()
         self.depth = depth
@@ -84,23 +84,22 @@ class MLPMixer(nn.Module):
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
 
-        patch_size = in_dim // num_patches
-        chn_dim = hidden_dim
         self.patch = EmbPatches(
             input_dim=in_dim, 
             num_patches=num_patches, 
-            hidden_dim=chn_dim
+            hidden_dim=hidden_dim,
         )
         self.mixer_blocks = nn.Sequential(*[
             MixerBlock(
                 num_patches=num_patches, 
-                chn_dim=chn_dim, 
+                chn_dim=hidden_dim, 
                 tok_hid_dim=hidden_dim, 
-                chn_hid_dim=chn_dim
+                chn_hid_dim=hidden_dim,
+                p=p,
             )  for _ in range(depth)
         ])
         self.initialize_weights(weight_init)
-        self.output = nn.Linear(num_patches * chn_dim, out_dim)
+        self.output = nn.Linear(hidden_dim, out_dim)
     
     def initialize_weights(self, weight_init: str):
         for module in self.modules():
@@ -125,5 +124,5 @@ class MLPMixer(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch(x[:, None, :])
         x = self.mixer_blocks(x)
-        x = x.reshape(x.shape[0], -1)
+        x = x.mean(dim=1) # global mean pooling
         return self.output(x)

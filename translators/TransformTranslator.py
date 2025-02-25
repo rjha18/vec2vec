@@ -58,7 +58,7 @@ class TransformTranslator(AbsNTranslator):
                 MLPMixer(
                     depth=self.depth, 
                     in_dim=dims, 
-                    hidden_dim=self.d_hidden // self.cfg.mixer_num_patches, 
+                    hidden_dim=self.d_hidden,
                     out_dim=self.transform.in_dim, 
                     num_patches=self.cfg.mixer_num_patches, 
                     weight_init=self.weight_init
@@ -66,7 +66,7 @@ class TransformTranslator(AbsNTranslator):
                 MLPMixer(
                     depth=self.depth, 
                     in_dim=self.transform.out_dim, 
-                    hidden_dim=self.d_hidden // self.cfg.mixer_num_patches,
+                    hidden_dim=self.d_hidden,
                     out_dim=dims, 
                     num_patches=self.cfg.mixer_num_patches,
                     weight_init=self.weight_init
