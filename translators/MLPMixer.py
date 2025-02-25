@@ -26,7 +26,6 @@ class EmbPatches(nn.Module):
         )
 
     def forward(self, emb: torch.Tensor) -> torch.Tensor:
-        print("Reshaping emb", emb.shape, "into patches", (emb.shape[0], self.num_patches, self.patch_size))
         patches = emb.reshape(emb.shape[0], self.num_patches, self.patch_size)
         patches = torch.einsum('bpd, dh -> bph', patches, self.patch_weights)
         proj = self.projection(patches)
@@ -77,7 +76,6 @@ class MLPMixer(nn.Module):
             out_dim: int,
             num_patches: int,
             weight_init: str = 'kaiming',
-            num_channels: int = 8, # TODO: argparse?
         ):
         super().__init__()
         self.depth = depth
@@ -86,21 +84,23 @@ class MLPMixer(nn.Module):
         self.out_dim = out_dim
         self.layers = nn.ModuleList()
 
-
         patch_size = in_dim // num_patches
         chn_dim = hidden_dim
-        in_channels = 1
         self.patch = EmbPatches(
             input_dim=in_dim, 
             num_patches=num_patches, 
             hidden_dim=chn_dim
         )
         self.mixer_blocks = nn.Sequential(*[
-            MixerBlock(num_patches=num_patches, chn_dim=chn_dim, tok_hid_dim=hidden_dim, chn_hid_dim=chn_dim)
-            for _ in range(depth)
+            MixerBlock(
+                num_patches=num_patches, 
+                chn_dim=chn_dim, 
+                tok_hid_dim=hidden_dim, 
+                chn_hid_dim=chn_dim
+            )  for _ in range(depth)
         ])
-        self.output = nn.Linear(hidden_dim, out_dim)
         self.initialize_weights(weight_init)
+        self.output = nn.Linear(num_patches * chn_dim, out_dim)
     
     def initialize_weights(self, weight_init: str):
         for module in self.modules():
@@ -122,8 +122,8 @@ class MLPMixer(nn.Module):
                 torch.nn.init.constant_(module.bias, 0)
                 torch.nn.init.constant_(module.weight, 1.0)
          
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch(x[:, None, :])
         x = self.mixer_blocks(x)
-        x = self.output(x.mean(dim=1))
-        return x
+        x = x.reshape(x.shape[0], -1)
+        return self.output(x)
