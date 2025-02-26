@@ -92,6 +92,34 @@ def eval_batch(ins, recons, translations):
     return recon_res, translation_res
 
 
+def text_batch(ins, recons, translations, inverters, max_seq_length=32):
+    recon_res = {}
+    translation_res = {}
+
+    for target_flag, inverter in inverters.items():
+        gt = generate_text(inverter, ins[target_flag], max_seq_length=max_seq_length)
+
+        rec = recons[target_flag]
+        rec = rec / rec.norm(dim=1, keepdim=True)
+        rec_text = generate_text(inverter, rec, max_seq_length=max_seq_length)
+        recon_res[target_flag] = {
+            "bleu": calculate_scores('bleu', gt, rec_text),
+            "f1": calculate_scores('f1', gt, rec_text)
+        }
+        translation_res[target_flag] = {}
+        for flag, trans in translations[target_flag].items():
+            trans = trans / trans.norm(dim=1, keepdim=True)
+            trans_text = generate_text(inverter, trans, max_seq_length=max_seq_length)
+            translation_res[target_flag][flag] = {
+                "bleu": calculate_scores('bleu', gt, trans_text),
+                "f1": calculate_scores('f1', gt, trans_text)
+            }
+            print('gt:', gt[0])
+            print('rec:', rec_text[0])
+            print(f'trans ({flag} -> {target_flag}):', trans_text[0])
+    return recon_res, translation_res
+
+
 def merge_dicts(full, incremental):
     def recursive_merge(f, i):
         for key, val in i.items():
@@ -171,13 +199,16 @@ def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size
     return res
 
 def eval_loop_(
-    cfg, translator, encoders, iter, pbar=None, device='cpu'
+    cfg, translator, encoders, iter, inverters=None, pbar=None, device='cpu'
 ):
     recon_res = {}
     translation_res = {}
     heatmap_res = {}
+    text_recon_res = {}
+    text_translation_res = {}
 
-    top_k_batches = min(cfg.top_k_batches, len(iter)) if hasattr(cfg, 'top_k_batches') else 0
+    top_k_batches = cfg.top_k_batches if hasattr(cfg, 'top_k_batches') else 0
+    text_batches = cfg.text_batches if hasattr(cfg, 'text_batches') else 0
     with torch.no_grad():
         n = 0
         for i, batch in enumerate(iter):
@@ -192,13 +223,19 @@ def eval_loop_(
                 heatmap_size = cfg.heatmap_size if i == top_k_batches - 1 else None
                 batch_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, heatmap_size, cfg.k)
                 merge_dicts(heatmap_res, batch_res)
+            if i < text_batches and inverters is not None:
+                t_r_res, t_t_res = text_batch(ins, recons, translations, inverters)
+                merge_dicts(text_recon_res, t_r_res)
+                merge_dicts(text_translation_res, t_t_res)
             if pbar is not None:
                 pbar.update(1)
 
         mean_dicts(recon_res)
         mean_dicts(translation_res)
         mean_dicts(heatmap_res)
-        return recon_res, translation_res, heatmap_res
+        mean_dicts(text_recon_res)
+        mean_dicts(text_translation_res)
+        return recon_res, translation_res, heatmap_res, text_recon_res, text_translation_res
 
 # TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.
 # def text_loop_(
