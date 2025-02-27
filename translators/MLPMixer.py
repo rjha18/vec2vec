@@ -3,15 +3,6 @@ import torch
 import torch.nn as nn
 
 
-def add_residual(input_x: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    if input_x.shape[1] < x.shape[1]:
-        padding = torch.zeros(x.shape[0], x.shape[1] - input_x.shape[1], device=x.device)
-        input_x = torch.cat([input_x, padding], dim=1)
-    elif input_x.shape[1] > x.shape[1]:
-        input_x = input_x[:, :x.shape[1]]
-    return x + input_x
-
-
 class EmbPatches(nn.Module):
     def __init__(self, input_dim: int, num_patches: int, hidden_dim: int):
         super().__init__()
@@ -98,31 +89,18 @@ class MLPMixer(nn.Module):
                 p=p,
             )  for _ in range(depth)
         ])
-        self.initialize_weights(weight_init)
-        self.output = nn.Linear(hidden_dim, out_dim)
+
+        assert out_dim % num_patches == 0, f"Output dim {out_dim} must be divisible by num_patches {num_patches}"
+        self.downproject = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, out_dim // num_patches),
+            Rearrange('b t d -> b (t d)'),
+            nn.GELU(),
+            nn.Linear(out_dim, out_dim)
+        )
     
-    def initialize_weights(self, weight_init: str):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                print("initializing", type(module))
-                if weight_init == 'kaiming':
-                    torch.nn.init.kaiming_normal_(module.weight, a=0, mode='fan_in', nonlinearity='relu')
-                elif weight_init == 'xavier':
-                    torch.nn.init.xavier_normal_(module.weight)
-                elif weight_init == 'orthogonal':
-                    torch.nn.init.orthogonal_(module.weight)
-                else:
-                    raise ValueError(f"Unknown weight initialization: {weight_init}")
-                module.bias.data.fill_(0)
-            elif isinstance(module, nn.BatchNorm1d):
-                torch.nn.init.normal_(module.weight, mean=1.0, std=0.02)
-                torch.nn.init.normal_(module.bias, mean=0.0, std=0.02) 
-            elif isinstance(module, nn.LayerNorm):
-                torch.nn.init.constant_(module.bias, 0)
-                torch.nn.init.constant_(module.weight, 1.0)
-         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch(x[:, None, :])
         x = self.mixer_blocks(x)
-        x = x.mean(dim=1) # global mean pooling
-        return self.output(x)
+        return self.downproject(x)
+

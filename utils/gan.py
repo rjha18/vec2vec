@@ -90,7 +90,7 @@ class VanillaGAN:
 
     def step(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[
             torch.Tensor, torch.Tensor, torch.Tensor, float, float, float]:
-        self.generator.eval()
+        self.generator.train()
         self.discriminator.train()
         self.set_discriminator_requires_grad(True)
         r1_penalty, disc_loss, disc_acc_real, disc_acc_fake = self.step_discriminator(
@@ -98,7 +98,7 @@ class VanillaGAN:
             fake_data=fake_data.detach()
         )
         self.generator.train()
-        self.discriminator.eval()
+        self.discriminator.train()
         self.set_discriminator_requires_grad(False)
         gen_loss, gen_acc = self.step_generator(
             real_data=real_data,
@@ -151,7 +151,7 @@ class LeastSquaresGAN(VanillaGAN):
 
 class RelativisticGAN(VanillaGAN):
     def _step_discriminator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float, float]:
-        self.generator.eval()
+        self.generator.train()
         d_real_logits = self.discriminator(real_data)
         d_fake_logits = self.discriminator(fake_data)
 
@@ -171,7 +171,7 @@ class RelativisticGAN(VanillaGAN):
         return disc_loss, disc_acc_real, disc_acc_fake
 
     def _step_generator(self, real_data: torch.Tensor, fake_data: torch.Tensor) -> tuple[torch.Tensor, float]:
-        self.discriminator.eval()
+        self.discriminator.train()
 
         d_real_logits = self.discriminator(real_data)
         d_fake_logits = self.discriminator(fake_data)
