@@ -13,3 +13,5 @@ model_weights/
 datasets/
 finetuning_unsupervised/
 media/
+wandb
+finetuning_unsupervised
