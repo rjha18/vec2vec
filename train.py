@@ -509,7 +509,7 @@ def main():
 
                 if len(heatmap_dict) > 0:
                     for k,v in heatmap_dict.items():
-                        if k in ["heatmap", "heatmap_softmax"]:
+                        if "heatmap" in k and 'top' not in k:
                             v = wandb.Image(v)
                             val_res[f"val/{k}"] = v
                         else:

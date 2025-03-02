@@ -159,41 +159,41 @@ def get_avg_rank(sims: np.ndarray) -> float:
     return ranks.argmax(1).mean() + 1
 
 
-def create_heatmap(translator, ins, sup_emb, unsup_emb, top_k_size, heatmap_size=None, k=16) -> dict:
+def create_heatmap(translator, ins, tgt_emb, src_emb, top_k_size, heatmap_size=None, k=16) -> dict:
     res = {}
     ins = {k: v[:top_k_size] for k, v in ins.items()}
-    trans = translator.translate_embeddings(ins[unsup_emb], unsup_emb, sup_emb)
-    ins_norm = F.normalize(ins[sup_emb].cpu(), p=2, dim=1)
+    trans = translator.translate_embeddings(ins[src_emb], src_emb, tgt_emb)
+    ins_norm = F.normalize(ins[tgt_emb].cpu(), p=2, dim=1)
     trans_norm = F.normalize(trans.cpu(), p=2, dim=1)
     sims = (ins_norm @ trans_norm.T).numpy()
-    res['top_1_acc'] = (sims.argmax(axis=1) == np.arange(sims.shape[0])).mean()
-    res[f'top_{k}_acc'] = top_k_accuracy(sims, k)
-    res["top_rank"] = get_avg_rank(sims)
+    res[f'{src_emb}_{tgt_emb}_top_1_acc'] = (sims.argmax(axis=1) == np.arange(sims.shape[0])).mean()
+    res[f'{src_emb}_{tgt_emb}_top_{k}_acc'] = top_k_accuracy(sims, k)
+    res[f"{src_emb}_{tgt_emb}_top_rank"] = get_avg_rank(sims)
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
         sims_softmax = F.softmax(torch.tensor(sims) * 100, dim=1).numpy()
-        res['heatmap_top_1_acc'] = top_k_accuracy(sims, 1)
+        res[f'{src_emb}_{tgt_emb}_heatmap_top_1_acc'] = top_k_accuracy(sims, 1)
         if heatmap_size > k:
-            res[f'heatmap_top_{k}_acc'] = top_k_accuracy(sims, k)
+            res[f'{src_emb}_{tgt_emb}_heatmap_top_{k}_acc'] = top_k_accuracy(sims, k)
 
         # plot sims
         fig, ax = plt.subplots(figsize=(6,5))
         sns.heatmap(sims, vmin=0, vmax=1, cmap='coolwarm', ax=ax)
         ax.set_title('Heatmap of cosine similarities')
-        ax.set_xlabel(f'Fake ({unsup_emb}->{sup_emb})')
-        ax.set_ylabel(f'Real ({sup_emb})')
+        ax.set_xlabel(f'Fake ({src_emb}->{tgt_emb})')
+        ax.set_ylabel(f'Real ({tgt_emb})')
         plt.tight_layout()
-        res['heatmap'] = fig 
+        res[f'{src_emb}_{tgt_emb}_heatmap'] = fig 
         plt.close(fig)
     
         # plot sims w/ softmax
         fig, ax = plt.subplots(figsize=(8,7))
         sns.heatmap(sims_softmax, cmap='Purples', ax=ax)
         ax.set_title('Heatmap of cosine similarities (softmaxed)')
-        ax.set_xlabel(f'Fake ({unsup_emb}->{sup_emb})')
-        ax.set_ylabel(f'Real ({sup_emb})')
+        ax.set_xlabel(f'Fake ({src_emb}->{tgt_emb})')
+        ax.set_ylabel(f'Real ({tgt_emb})')
         plt.tight_layout()
-        res['heatmap_softmax'] = fig 
+        res[f'{src_emb}_{tgt_emb}_heatmap_softmax'] = fig 
         plt.close(fig)
 
     return res
@@ -222,6 +222,7 @@ def eval_loop_(
             if i < top_k_batches and hasattr(cfg, 'top_k_size') and hasattr(cfg, 'k') and cfg.top_k_size > 0:
                 heatmap_size = cfg.heatmap_size if i == top_k_batches - 1 else None
                 batch_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, heatmap_size, cfg.k)
+                batch_res.update(create_heatmap(translator, ins, cfg.unsup_emb, cfg.sup_emb, cfg.top_k_size, heatmap_size, cfg.k))
                 merge_dicts(heatmap_res, batch_res)
             if i < text_batches and inverters is not None:
                 t_r_res, t_t_res = text_batch(ins, recons, translations, inverters)
@@ -236,40 +237,6 @@ def eval_loop_(
         mean_dicts(text_recon_res)
         mean_dicts(text_translation_res)
         return recon_res, translation_res, heatmap_res, text_recon_res, text_translation_res
-
-# TODO: Bug with sampling in loop! not all encoders are sampled each step, but are penalized as if.
-# def text_loop_(
-#     cfg, translator, encoders, inverters, iter, pbar=None, device='cpu'
-# ):
-#     # Losses
-#     bleus = {k: {r: 0 for r in encoders.keys()} for k in cfg.text_embs}
-#     f1s = {k: {r: 0 for r in encoders.keys()} for k in cfg.text_embs}
-
-#     # Calculate BLEU
-#     total = 0
-#     with torch.no_grad():
-#         for batch in iter:
-#             ins = process_batch(cfg, batch, encoders, device)
-
-#             target_texts = {}
-#             translations = {}
-#             for target_flag in cfg.text_embs:
-#                 target_texts[target_flag] = generate_text(inverters[target_flag], ins[target_flag], 32)
-#                 translations[target_flag] = {}
-#                 for flag, emb in ins.items():
-#                     trans = translator.translate_embeddings(emb, flag, target_flag)
-#                     translations[target_flag][flag] = generate_text(inverters[target_flag], trans, 32)
-
-#             for t_flag, t_text in target_texts.items():
-#                 for tr_flag, tr_text in translations[t_flag].items():
-#                     bleus[t_flag][tr_flag] = calculate_scores('bleu', t_text, tr_text) * cfg.val_bs + bleus[t_flag][tr_flag]
-#                     f1s[t_flag][tr_flag] = calculate_scores('f1', t_text, tr_text) * cfg.val_bs + f1s[t_flag][tr_flag]
-
-#             total += cfg.val_bs
-#             if pbar is not None:
-#                 pbar.update(1)
-
-#         return {k: {r: v / total for r, v in bleus[k].items()} for k in bleus}, {k: {r: v / total for r, v in f1s[k].items()} for k in f1s}
 
 
 class EarlyStopper:
