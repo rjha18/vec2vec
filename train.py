@@ -38,22 +38,29 @@ def training_loop_(
             wandb.watch(translator, log='all')
         except:
             pass
+    
+    if sup_iter is not None:
+        dataloader_pbar = unsup_dataloader
+    else:
+        dataloader_pbar = zip(sup_dataloader, unsup_dataloader)
 
     if get_rank() == 0:
-        dataloader_pbar = tqdm(unsup_dataloader, total=len(unsup_dataloader), desc="Training")
-    else:
-        dataloader_pbar = unsup_dataloader
+        dataloader_pbar = tqdm(dataloader_pbar, total=len(unsup_dataloader), desc="Training")
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
 
     translator.train()
-    for i, unsup_batch in enumerate(dataloader_pbar):
-        try:
-            sup_batch = next(sup_iter)
-        except StopIteration:
-            print('Restarting sup_dataloader...')
-            sup_iter = iter(sup_dataloader)
-            sup_batch = next(sup_iter)
+    for i, batches in enumerate(dataloader_pbar):
+        if sup_iter is not None:
+            try:
+                sup_batch = next(sup_iter)
+            except StopIteration:
+                print('Restarting sup_dataloader...')
+                sup_iter = iter(sup_dataloader)
+                sup_batch = next(sup_iter)
+            unsup_batch = batches
+        else:
+            sup_batch, unsup_batch = batches
 
         if max_num_batches is not None and i >= max_num_batches:
             print(f"Early stopping at {i} batches")
@@ -506,7 +513,10 @@ def main():
         accelerator=accelerator
     )
 
-    sup_iter = iter(sup_dataloader)
+    sup_iter = None
+    if hasattr(cfg, 'unsup_points'):
+        sup_iter = iter(sup_dataloader)
+
     for epoch in range(max_num_epochs):
         if use_val_set and get_rank() == 0:
             with torch.no_grad(), accelerator.autocast():
