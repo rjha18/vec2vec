@@ -309,12 +309,15 @@ def main():
     valset = dset_dict["test"]
 
     assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
+    dset = dset.shuffle(seed=cfg.train_dataset_seed)
     if hasattr(cfg, 'num_points'):
-        supset = dset.shuffle(seed=cfg.train_dataset_seed + 1).select(range(min(cfg.num_points, len(dset))))
-        unsupset = dset.shuffle(seed=cfg.train_dataset_seed + 2).select(range(min(cfg.num_points, len(dset))))
+        assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
+        supset = dset.select(range(cfg.num_points))
+        unsupset = dset.select(range(cfg.num_points, cfg.num_points * 2))
     elif hasattr(cfg, 'unsup_points'):
-        unsupset = dset.shuffle(seed=cfg.train_dataset_seed).select(range(min(cfg.unsup_points, len(dset))))
-        supset = dset.shuffle(seed=cfg.train_dataset_seed).select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+        unsupset = dset.select(range(min(cfg.unsup_points, len(dset))))
+        supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+
 
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
