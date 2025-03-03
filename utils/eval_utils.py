@@ -4,7 +4,6 @@ import evaluate
 import torch
 import torch.nn.functional as F
 import numpy as np
-from sklearn.metrics.pairwise import cosine_distances
 
 from utils.streaming_utils import process_batch
 
@@ -106,6 +105,8 @@ def text_batch(ins, recons, translations, inverters, max_seq_length=32):
             "bleu": calculate_scores('bleu', gt, rec_text),
             "f1": calculate_scores('f1', gt, rec_text)
         }
+        print('gt:', gt[0])
+        print('rec:', rec_text[0])
         translation_res[target_flag] = {}
         for flag, trans in translations[target_flag].items():
             trans = trans / trans.norm(dim=1, keepdim=True)
@@ -114,8 +115,6 @@ def text_batch(ins, recons, translations, inverters, max_seq_length=32):
                 "bleu": calculate_scores('bleu', gt, trans_text),
                 "f1": calculate_scores('f1', gt, trans_text)
             }
-            print('gt:', gt[0])
-            print('rec:', rec_text[0])
             print(f'trans ({flag} -> {target_flag}):', trans_text[0])
     return recon_res, translation_res
 
@@ -210,10 +209,8 @@ def eval_loop_(
     top_k_batches = cfg.top_k_batches if hasattr(cfg, 'top_k_batches') else 0
     text_batches = cfg.text_batches if hasattr(cfg, 'text_batches') else 0
     with torch.no_grad():
-        n = 0
         for i, batch in enumerate(iter):
-            ins = process_batch(cfg, batch, encoders, device)                
-            n += cfg.val_bs
+            ins = process_batch(cfg, batch, encoders, device)
             recons, translations = translator(ins, include_reps=False)
             
             r_res, t_res = eval_batch(ins, recons, translations)

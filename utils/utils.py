@@ -106,7 +106,7 @@ def get_inverters(emb_flags, device='cpu'):
     for emb_flag in emb_flags:
         assert emb_flag in ['gtr', 'gte']
         if emb_flag == "gtr":
-            # inversion_model = InversionModel.from_pretrained("jxm/gtr-32-noise-0.0001")
+            # inversion_model = InversionModel.from_pretrained("jxm/gtr-32-noise-0.001")
             # inversion_model = InversionModel.from_pretrained("ielabgroup/vec2text_gtr-base-st_corrector")
             inversion_model = InversionModel.from_pretrained("ielabgroup/vec2text_gtr-base-st_inversion")
 

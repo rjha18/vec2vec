@@ -64,7 +64,7 @@ def main():
     cfg.num_params = sum(x.numel() for x in translator.parameters())
     print("Number of parameters:", cfg.num_params)
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.dataset_seed)
+    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
     valset = dset_dict["test"]
 
     num_workers = get_num_proc()
@@ -74,7 +74,7 @@ def main():
         n_embs_per_batch=2,
         batch_size=cfg.val_bs,
         max_length=cfg.max_seq_length,
-        seed=cfg.seed,
+        seed=cfg.sampling_seed,
     )
     valloader = DataLoader(
         valset,
@@ -95,7 +95,7 @@ def main():
     translator = accelerator.prepare(translator)
     inverters = get_inverters(["gtr"], accelerator.device)
 
-    with torch.no_grad(), accelerator.autocast():
+    with torch.no_grad():
         translator.eval()
         val_res = {}
         recons, trans, heatmap_dict, text_recons, text_trans =\
