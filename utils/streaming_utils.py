@@ -132,7 +132,7 @@ def forward_embedding_sentence_transformers(enc, features, normalize_embeddings:
     return embeddings.to(torch.float32)
 
 
-def process_batch(cfg, batch, encoders, device='cpu'):
+def process_batch(batch, encoders, normalize_embeddings, device='cpu'):
     ins = {}
     batch_embs = [k.replace("_input_ids", "") for k in batch.keys() if k.endswith("_input_ids")]
     for emb in batch_embs:
@@ -140,7 +140,7 @@ def process_batch(cfg, batch, encoders, device='cpu'):
         emb_inputs = { k.replace(f"{emb}_", ""): v for k, v in batch.items() if k.startswith(f"{emb}_") }
         ins[emb] = forward_embedding_sentence_transformers(
             encoders[emb], emb_inputs,
-            normalize_embeddings=cfg.normalize_embeddings
+            normalize_embeddings=normalize_embeddings
         )
     return ins
 

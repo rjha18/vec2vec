@@ -54,8 +54,8 @@ def training_loop_(
         with accelerator.accumulate(translator), accelerator.autocast():
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
             ins = {
-                **process_batch(cfg, sup_batch, sup_encs, device), 
-                **process_batch(cfg, unsup_batch, unsup_enc, device)
+                **process_batch(sup_batch, sup_encs, cfg.normalize_embeddings, device), 
+                **process_batch(unsup_batch, unsup_enc, cfg.normalize_embeddings, device)
             }
             recons, translations, reps = translator(
                 ins, noise_level=cfg.noise_level, include_reps=True

@@ -10,6 +10,28 @@ from utils.streaming_utils import process_batch
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from utils.tokenization import get_tokenizer_max_length
+
+
+def text_to_embedding(text, flag, encoder, normalize_embeddings, max_length=32, device='cpu'):
+    max_length = min(get_tokenizer_max_length(encoder.tokenizer), max_length)
+    text = text[:max_length * 5]
+    output = {}
+
+    tt = encoder.tokenizer(
+        text,
+        truncation=True,
+        padding="max_length",
+        max_length=max_length,
+        return_tensors="pt",
+    )
+
+    output.update({f"{flag}_{key}": value for key, value in tt.items()})
+    if "token_name_idxs" in output: output.pop("token_name_idxs")
+    batch = { k: v.to(device) for k,v in output.items()}
+
+    return process_batch(batch, {flag: encoder}, normalize_embeddings, device)[flag]
+
 
 def generate_text(inverter, embeddings, max_seq_length=32):
     gen_kwargs = {
@@ -91,19 +113,22 @@ def eval_batch(ins, recons, translations):
     return recon_res, translation_res
 
 
-def text_batch(ins, recons, translations, inverters, max_seq_length=32):
+def text_batch(ins, recons, translations, inverters, encoders, normalize_embeddings, max_seq_length=32, device='cpu'):
     recon_res = {}
     translation_res = {}
 
     for target_flag, inverter in inverters.items():
         gt = generate_text(inverter, ins[target_flag], max_seq_length=max_seq_length)
+        gt_emb = text_to_embedding(gt, target_flag, encoders[target_flag], normalize_embeddings, max_seq_length, device)
 
         rec = recons[target_flag]
         rec = rec / rec.norm(dim=1, keepdim=True)
         rec_text = generate_text(inverter, rec, max_seq_length=max_seq_length)
+        rec_emb = text_to_embedding(rec_text, target_flag, encoders[target_flag], normalize_embeddings, max_seq_length, device)
         recon_res[target_flag] = {
             "bleu": calculate_scores('bleu', gt, rec_text),
-            "f1": calculate_scores('f1', gt, rec_text)
+            "f1": calculate_scores('f1', gt, rec_text),
+            "t_cos": F.cosine_similarity(gt_emb, rec_emb).mean().item(),
         }
         print('gt:', gt[0])
         print('rec:', rec_text[0])
@@ -111,9 +136,11 @@ def text_batch(ins, recons, translations, inverters, max_seq_length=32):
         for flag, trans in translations[target_flag].items():
             trans = trans / trans.norm(dim=1, keepdim=True)
             trans_text = generate_text(inverter, trans, max_seq_length=max_seq_length)
+            trans_emb = text_to_embedding(trans_text, target_flag, encoders[target_flag], normalize_embeddings, max_seq_length, device)
             translation_res[target_flag][flag] = {
                 "bleu": calculate_scores('bleu', gt, trans_text),
-                "f1": calculate_scores('f1', gt, trans_text)
+                "f1": calculate_scores('f1', gt, trans_text),
+                "t_cos": F.cosine_similarity(trans_emb, gt_emb).mean().item(),
             }
             print(f'trans ({flag} -> {target_flag}):', trans_text[0])
     return recon_res, translation_res
@@ -210,7 +237,7 @@ def eval_loop_(
     text_batches = cfg.text_batches if hasattr(cfg, 'text_batches') else 0
     with torch.no_grad():
         for i, batch in enumerate(iter):
-            ins = process_batch(cfg, batch, encoders, device)
+            ins = process_batch(batch, encoders, cfg.normalize_embeddings, device)
             recons, translations = translator(ins, include_reps=False)
             
             r_res, t_res = eval_batch(ins, recons, translations)
@@ -222,7 +249,7 @@ def eval_loop_(
                 batch_res.update(create_heatmap(translator, ins, cfg.unsup_emb, cfg.sup_emb, cfg.top_k_size, heatmap_size, cfg.k))
                 merge_dicts(heatmap_res, batch_res)
             if i < text_batches and inverters is not None:
-                t_r_res, t_t_res = text_batch(ins, recons, translations, inverters)
+                t_r_res, t_t_res = text_batch(ins, recons, translations, inverters, encoders, cfg.normalize_embeddings, cfg.max_seq_length, device)
                 merge_dicts(text_recon_res, t_r_res)
                 merge_dicts(text_translation_res, t_t_res)
             if pbar is not None:
