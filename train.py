@@ -44,8 +44,6 @@ def training_loop_(
     else:
         dataloader_pbar = zip(sup_dataloader, unsup_dataloader)
 
-    model_save_dir = os.path.join(save_dir, 'model.pt')
-
     translator.train()
     for i, (sup_batch, unsup_batch) in enumerate(dataloader_pbar):
         if max_num_batches is not None and i >= max_num_batches:
@@ -199,15 +197,21 @@ def training_loop_(
             if get_rank() == 0:
                 dataloader_pbar.set_postfix(metrics)
 
-    with open(save_dir + 'config.toml', 'w') as f:
-        toml.dump(cfg.__dict__, f)
-    torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
+    save_everything(cfg, translator, opt, [gan, sup_gan, latent_gan, similarity_gan], save_dir)
 
 
 def main():
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
-    cfg = toml.load(f'configs/{argv[1]}.toml')
-    unknown_cfg = read_args(argv)
+    if argv[1] == "--restart":
+        exp_restart = True
+        cfg = toml.load(f'{argv[2]}.toml')
+        if len(argv) > 3:
+            unknown_cfg = read_args(argv[3:])
+    else:
+        exp_restart = False
+        cfg = toml.load(f'configs/{argv[1]}.toml')
+        unknown_cfg = read_args(argv)
+        cfg['wandb_id'] = wandb.util.generate_id()
     cfg = SimpleNamespace(**{**{k: v for d in cfg.values() for k, v in d.items()}, **unknown_cfg})
 
     if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
@@ -232,15 +236,19 @@ def main():
 
     if hasattr(cfg, 'force_wandb_name') and cfg.force_wandb_name:
         save_dir = cfg.save_dir.format(cfg.wandb_name)
-    else:
+    elif not exp_restart:
         cfg.wandb_name = ','.join([f"{k[0]}:{v}" for k, v in unknown_cfg.items()]) if unknown_cfg else cfg.wandb_name
         save_dir = cfg.save_dir.format(cfg.latent_dims if hasattr(cfg, 'latent_dims') else cfg.wandb_name)
+    else:
+        save_dir = cfg.save_dir
 
     logger = Logger(
         project=cfg.wandb_project,
         name=cfg.wandb_name,
         dummy=(cfg.wandb_project is None) or not (cfg.use_wandb),
         config=cfg,
+        id=cfg.wandb_id,
+        resume='allow',
     )
 
     print("Running Experiment:", cfg.wandb_name)
@@ -254,9 +262,6 @@ def main():
         cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])
     }
     translator = load_n_translator(cfg, encoder_dims)
-
-    model_save_dir = os.path.join(save_dir, 'model.pt')
-    disc_save_dir = os.path.join(save_dir, 'disc.pt')
 
     os.makedirs(save_dir, exist_ok=True)
 
@@ -432,12 +437,6 @@ def main():
     latent_disc_scheduler = LambdaLR(latent_disc_opt, lr_lambda=lr_lambda)
     similarity_disc_scheduler = LambdaLR(similarity_disc_opt, lr_lambda=lr_lambda)
 
-    if cfg.finetune_mode:
-        assert hasattr(cfg, 'load_dir')
-        print(f"Loading models from {cfg.load_dir}...")
-        translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
-        disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
-
     translator, opt, scheduler = accelerator.prepare(translator, opt, scheduler)
     disc, disc_opt, disc_scheduler = accelerator.prepare(disc, disc_opt, disc_scheduler)
     sup_disc, sup_disc_opt, sup_disc_scheduler = accelerator.prepare(sup_disc, sup_disc_opt, sup_disc_scheduler)
@@ -447,8 +446,6 @@ def main():
     )
     sup_dataloader, unsup_dataloader = accelerator.prepare(sup_dataloader, unsup_dataloader)
 
-    best_model = None
-    best_disc = None
 
     if cfg.gan_style == "vanilla":
         gan_cls = VanillaGAN
@@ -490,6 +487,11 @@ def main():
         discriminator_scheduler=sup_disc_scheduler,
         accelerator=accelerator
     )
+
+    if exp_restart:
+        print(f"Loading models from {save_dir}...")
+        load_everything(translator, opt, [gan, sup_gan, latent_gan, similarity_gan], save_dir)
+
     for epoch in range(max_num_epochs):
         if use_val_set and get_rank() == 0:
             with torch.no_grad(), accelerator.autocast():
@@ -541,14 +543,6 @@ def main():
             logger=logger,
             max_num_batches=max_num_batches
         )
-
-    with open(save_dir + 'config.toml', 'w') as f:
-        toml.dump(cfg.__dict__, f)
-    # save model
-    best_model = best_model if best_model is not None else accelerator.unwrap_model(translator).state_dict()
-    best_disc = best_disc if best_disc is not None else disc.state_dict()
-    torch.save(best_model, model_save_dir)
-    torch.save(best_disc, disc_save_dir)
 
 
 if __name__ == "__main__":

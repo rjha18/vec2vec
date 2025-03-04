@@ -177,3 +177,20 @@ def exit_on_nan(loss: torch.Tensor) -> None:
     if torch.isnan(loss).any():
         print("Loss is NaN! exiting")
         exit(1)
+
+
+def save_everything(cfg, translator, opt, gans, save_dir):
+    torch.save(translator.state_dict(), os.path.join(save_dir, 'model.pt'))
+    torch.save(opt.state_dict(), os.path.join(save_dir, 'opt.pt'))
+    for i, gan in enumerate(gans):
+        torch.save(gan.state_dict(), os.path.join(save_dir, f'gan_{i}.pt'))
+        torch.save(gan.discriminator_opt.state_dict(), os.path.join(save_dir, f'gan_opt_{i}.pt'))
+    with open(os.path.join(save_dir, 'config.json'), 'w') as f:
+        json.dump(cfg.__dict__, f)
+
+def load_everything(translator, opt, gans, save_dir):
+    translator.load_state_dict(torch.load(os.path.join(save_dir, 'model.pt')))
+    opt.load_state_dict(torch.load(os.path.join(save_dir, 'opt.pt')))
+    for i, gan in enumerate(gans):
+        gan.load_state_dict(torch.load(os.path.join(save_dir, f'gan_{i}.pt')))
+        gan.discriminator_opt.load_state_dict(torch.load(os.path.join(save_dir, f'gan_opt_{i}.pt')))
