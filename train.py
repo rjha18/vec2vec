@@ -360,7 +360,7 @@ def main():
         )
         valloader = accelerator.prepare(valloader)
 
-    opt = torch.optim.Adam(translator.parameters(), lr=cfg.lr, fused=False, betas=(0.5, 0.999))
+    opt = torch.optim.Adam(translator.parameters(), lr=cfg.lr, fused=False, betas=(0.0, 0.97))
     
     ######################################################################################
     disc = Discriminator(
@@ -370,7 +370,7 @@ def main():
         depth=cfg.disc_depth,
         weight_init=cfg.weight_init
     )
-    disc_opt = torch.optim.Adam(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
+    disc_opt = torch.optim.Adam(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.0, 0.97))
 
     cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
     print(f"Number of discriminator parameters:", cfg.num_disc_params)
@@ -381,7 +381,7 @@ def main():
         discriminator_dim=cfg.disc_dim, 
         depth=cfg.disc_depth, 
     )
-    sup_disc_opt = torch.optim.Adam(sup_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
+    sup_disc_opt = torch.optim.Adam(sup_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.0, 0.97))
 
     cfg.num_sup_disc_params = sum(x.numel() for x in sup_disc.parameters())
     print(f"Number of supervised discriminator parameters:", cfg.num_sup_disc_params)
@@ -398,7 +398,7 @@ def main():
     cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
     print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
     print(latent_disc)
-    latent_disc_opt = torch.optim.Adam(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
+    latent_disc_opt = torch.optim.Adam(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.0, 0.97))
     ######################################################################################
     similarity_disc = Discriminator(
         cfg=cfg,
@@ -411,7 +411,7 @@ def main():
     cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
     print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
     print(similarity_disc)
-    similarity_disc_opt = torch.optim.Adam(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
+    similarity_disc_opt = torch.optim.Adam(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.0, 0.97))
     ######################################################################################
 
     max_num_epochs = int(np.ceil(cfg.epochs))
