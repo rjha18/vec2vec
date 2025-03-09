@@ -27,7 +27,7 @@ from utils.wandb_logger import Logger
 
 
 def training_loop_(
-    save_dir, accelerator, gan, sup_gan, latent_gan, similarity_gan, translator, sup_dataloader, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
+    save_dir, accelerator, gan, sup_gan, latent_gan, similarity_gan, translator, sup_dataloader, sup_iter, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -38,16 +38,30 @@ def training_loop_(
             wandb.watch(translator, log='all')
         except:
             pass
-
-    if get_rank() == 0:
-        dataloader_pbar = tqdm(zip(sup_dataloader, unsup_dataloader), total=len(sup_dataloader), desc="Training")
+    
+    if sup_iter is not None:
+        dataloader_pbar = unsup_dataloader
     else:
         dataloader_pbar = zip(sup_dataloader, unsup_dataloader)
+
+    if get_rank() == 0:
+        dataloader_pbar = tqdm(dataloader_pbar, total=len(unsup_dataloader), desc="Training")
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
 
     translator.train()
-    for i, (sup_batch, unsup_batch) in enumerate(dataloader_pbar):
+    for i, batches in enumerate(dataloader_pbar):
+        if sup_iter is not None:
+            try:
+                sup_batch = next(sup_iter)
+            except StopIteration:
+                print('Restarting sup_dataloader...')
+                sup_iter = iter(sup_dataloader)
+                sup_batch = next(sup_iter)
+            unsup_batch = batches
+        else:
+            sup_batch, unsup_batch = batches
+
         if max_num_batches is not None and i >= max_num_batches:
             print(f"Early stopping at {i} batches")
             break
@@ -57,6 +71,7 @@ def training_loop_(
                 **process_batch(sup_batch, sup_encs, cfg.normalize_embeddings, device), 
                 **process_batch(unsup_batch, unsup_enc, cfg.normalize_embeddings, device)
             }
+
             recons, translations, reps = translator(
                 ins, noise_level=cfg.noise_level, include_reps=True
             )
@@ -202,6 +217,7 @@ def training_loop_(
     with open(save_dir + 'config.toml', 'w') as f:
         toml.dump(cfg.__dict__, f)
     torch.save(accelerator.unwrap_model(translator).state_dict(), model_save_dir)
+    return sup_iter
 
 
 def main():
@@ -298,11 +314,17 @@ def main():
     dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
     dset = dset_dict["train"]
     valset = dset_dict["test"]
+
+    assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
+    dset = dset.shuffle(seed=cfg.train_dataset_seed)
     if hasattr(cfg, 'num_points'):
         assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
-        dset = dset.shuffle(seed=cfg.train_dataset_seed)
         supset = dset.select(range(cfg.num_points))
         unsupset = dset.select(range(cfg.num_points, cfg.num_points * 2))
+    elif hasattr(cfg, 'unsup_points'):
+        unsupset = dset.select(range(min(cfg.unsup_points, len(dset))))
+        supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+
 
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
@@ -490,6 +512,11 @@ def main():
         discriminator_scheduler=sup_disc_scheduler,
         accelerator=accelerator
     )
+
+    sup_iter = None
+    if hasattr(cfg, 'unsup_points'):
+        sup_iter = iter(sup_dataloader)
+
     for epoch in range(max_num_epochs):
         if use_val_set and get_rank() == 0:
             with torch.no_grad(), accelerator.autocast():
@@ -523,7 +550,7 @@ def main():
             max_num_batches = max(1, (cfg.epochs - epoch) * len(supset) // cfg.bs // get_world_size())
             print(f"Setting max_num_batches to {max_num_batches}")
 
-        training_loop_(
+        sup_iter = training_loop_(
             save_dir=save_dir,
             accelerator=accelerator,
             translator=translator,
@@ -532,6 +559,7 @@ def main():
             latent_gan=latent_gan,
             similarity_gan=similarity_gan,
             sup_dataloader=sup_dataloader,
+            sup_iter=sup_iter,
             unsup_dataloader=unsup_dataloader,
             sup_encs=sup_encs,
             unsup_enc=unsup_enc,
