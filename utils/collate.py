@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import collections
 import math
@@ -8,7 +8,6 @@ import random
 import datasets
 import numpy as np
 import torch
-import transformers
 
 from utils.tokenization import get_tokenizer_max_length
 
@@ -109,3 +108,24 @@ class MultiencoderTokenizedDataset(torch.utils.data.Dataset):
         
         if "token_name_idxs" in output: output.pop("token_name_idxs")
         return { k: v.flatten() for k,v in output.items()}
+
+
+class MultiEncoderClassificationDataset(MultiencoderTokenizedDataset):
+    def __init__(
+            self,
+            dataset: datasets.Dataset, 
+            encoders: dict[str, Any],
+            n_embs_per_batch: int, 
+            batch_size: int,
+            max_length: int, 
+            seed: int = 42,
+        ):
+        super().__init__(dataset, encoders, n_embs_per_batch, batch_size, max_length, seed)
+        self.labels = None
+        self.label_texts = None
+        self.encoders = encoders
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        out = super().__getitem__(idx)
+        out["label"] = self.dataset[int(self.new_indices[idx])]["label"]
+        return out

@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from utils.streaming_utils import process_batch
+from sklearn.metrics import precision_score, recall_score
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -188,6 +189,7 @@ def get_avg_rank(sims: np.ndarray) -> float:
 def create_heatmap(translator, ins, tgt_emb, src_emb, top_k_size, heatmap_size=None, k=16) -> dict:
     res = {}
     ins = {k: v[:top_k_size] for k, v in ins.items()}
+    # TODO: Can we just pass in translations?
     trans = translator.translate_embeddings(ins[src_emb], src_emb, tgt_emb)
     ins_norm = F.normalize(ins[tgt_emb].cpu(), p=2, dim=1)
     trans_norm = F.normalize(trans.cpu(), p=2, dim=1)
@@ -224,14 +226,71 @@ def create_heatmap(translator, ins, tgt_emb, src_emb, top_k_size, heatmap_size=N
 
     return res
 
+
+def top_k_accuracy_multi(predictions: torch.Tensor, ground_truth: torch.Tensor) -> float:
+    indices = ground_truth.nonzero()  # (num_labels, 2) where columns are (row_idx, class_idx)
+
+    # Group labels by row index
+    true_labels = [[] for _ in range(ground_truth.shape[0])]
+    for row, label in zip(indices[:, 0], indices[:, 1]):
+        true_labels[row.item()].append(label.item())
+
+    # Check if any of the top-k predictions match a ground truth label
+    correct_predictions = torch.tensor([
+        any(pred in true_labels[i] for pred in predictions[i]) for i in range(len(predictions))
+    ], dtype=torch.float)
+    
+    # Compute mean accuracy
+    return correct_predictions.mean().item()
+
+
+def top_k_p_r(predictions: np.ndarray, ground_truth: np.ndarray, k: int):
+    n, C = ground_truth.shape
+    pred_one_hot = np.zeros((n, C), dtype=int)
+    
+    # Convert top-k predictions to one-hot encoding
+    for i in range(n):
+        pred_one_hot[i, predictions[i]] = 1
+    
+    # Compute precision and recall for multilabel
+    precision_k = precision_score(ground_truth, pred_one_hot, average='samples', zero_division=0)
+    recall_k = recall_score(ground_truth, pred_one_hot, average='samples', zero_division=0)
+    
+    return precision_k, recall_k
+
+
+def classification_batch(ins, translations, labels, gt_mapping, k=1):
+    res = {}
+    for target_model in labels.keys():
+        labels_norm = F.normalize(labels[target_model], p=2, dim=1)
+        ins_norm = F.normalize(ins[target_model], p=2, dim=1)
+        sims = (ins_norm @ labels_norm.T)
+        top_k_preds = torch.argsort(sims, axis=1)[:, -k:]
+        res[f'{target_model}_top_{k}_acc'] = top_k_accuracy_multi(top_k_preds, gt_mapping)
+        p, r = top_k_p_r(top_k_preds.cpu().numpy(), gt_mapping.cpu().numpy(), k)
+        res[f'{target_model}_P@{k}'] = p
+        res[f'{target_model}_R@{k}'] = r
+        for model, trans in translations[target_model].items():
+            trans_norm = F.normalize(trans, p=2, dim=1)
+            sims = (trans_norm @ labels_norm.T)
+            top_k_preds = torch.argsort(sims, axis=1)[:, -k:]
+            res[f'{model}_{target_model}_top_{k}_acc'] = top_k_accuracy_multi(top_k_preds, gt_mapping)
+            p, r = top_k_p_r(top_k_preds.cpu().numpy(), gt_mapping.cpu().numpy(), k)
+            res[f'{model}_{target_model}_P@{k}'] = p
+            res[f'{model}_{target_model}_R@{k}'] = r
+
+    return res
+
+
 def eval_loop_(
-    cfg, translator, encoders, iter, inverters=None, pbar=None, device='cpu'
+    cfg, translator, encoders, iter, inverters=None, pbar=None, device='cpu', labels=None
 ):
     recon_res = {}
     translation_res = {}
     heatmap_res = {}
     text_recon_res = {}
     text_translation_res = {}
+    classification_res = {}
 
     top_k_batches = cfg.top_k_batches if hasattr(cfg, 'top_k_batches') else 0
     text_batches = cfg.text_batches if hasattr(cfg, 'text_batches') else 0
@@ -252,6 +311,9 @@ def eval_loop_(
                 t_r_res, t_t_res = text_batch(ins, recons, translations, inverters, encoders, cfg.normalize_embeddings, cfg.max_seq_length, device)
                 merge_dicts(text_recon_res, t_r_res)
                 merge_dicts(text_translation_res, t_t_res)
+            if labels is not None:
+                c_res = classification_batch(ins, translations, labels, batch['label'], k=3)
+                merge_dicts(classification_res, c_res)
             if pbar is not None:
                 pbar.update(1)
 
@@ -260,7 +322,8 @@ def eval_loop_(
         mean_dicts(heatmap_res)
         mean_dicts(text_recon_res)
         mean_dicts(text_translation_res)
-        return recon_res, translation_res, heatmap_res, text_recon_res, text_translation_res
+        mean_dicts(classification_res)
+        return recon_res, translation_res, heatmap_res, text_recon_res, text_translation_res, classification_res
 
 
 class EarlyStopper:

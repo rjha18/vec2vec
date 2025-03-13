@@ -522,7 +522,7 @@ def main():
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
-                recons, trans, heatmap_dict, _, _ = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
+                recons, trans, heatmap_dict, _, _, _ = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
                 for flag, res in recons.items():
                     for k, v in res.items():
                         if k == 'cos':
