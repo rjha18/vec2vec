@@ -15,3 +15,5 @@ finetuning_unsupervised/
 media/
 wandb
 finetuning_unsupervised
+old*
+data/
