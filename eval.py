@@ -65,19 +65,31 @@ def main():
     print("Number of parameters:", cfg.num_params)
 
     dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
+    dset = dset_dict["train"]
     valset = dset_dict["test"]
 
+    assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
+    dset = dset.shuffle(seed=cfg.train_dataset_seed)
+    if hasattr(cfg, 'num_points'):
+        assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
+        # supset = dset.select(range(cfg.num_points))
+        unsupset = dset.select(range(cfg.num_points, cfg.num_points + cfg.val_size))
+    elif hasattr(cfg, 'unsup_points'):
+        unsupset = dset.select(range(min(cfg.unsup_points, len(cfg.val_size))))
+        # supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+
+
     num_workers = get_num_proc()
-    valset = MultiencoderTokenizedDataset(
-        dataset=valset,
+    evalset = MultiencoderTokenizedDataset(
+        dataset=valset if hasattr(cfg, 'use_ood') and cfg.use_ood else unsupset,
         encoders={ **unsup_enc, **sup_encs },
         n_embs_per_batch=2,
         batch_size=cfg.val_bs,
         max_length=cfg.max_seq_length,
         seed=cfg.sampling_seed,
     )
-    valloader = DataLoader(
-        valset,
+    evalloader = DataLoader(
+        evalset,
         batch_size=cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
         num_workers=num_workers,
         shuffle=False,
@@ -86,7 +98,7 @@ def main():
         collate_fn=TokenizedCollator(),
         drop_last=True,
     )
-    valloader = accelerator.prepare(valloader)
+    evalloader = accelerator.prepare(evalloader)
 
     assert hasattr(cfg, 'load_dir')
     print(f"Loading models from {argv[1]}...")
@@ -99,41 +111,59 @@ def main():
         translator.eval()
         val_res = {}
         recons, trans, heatmap_dict, text_recons, text_trans, _ =\
-            eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, inverters=inverters, device=accelerator.device)
+            eval_loop_(
+                cfg,
+                translator,
+                {**sup_encs, **unsup_enc},
+                evalloader,
+                inverters=inverters,
+                device=accelerator.device
+            )
+        val_res['recons'] = {}
         for flag, res in recons.items():
             for k, v in res.items():
                 if k == 'cos':
-                    val_res[f"val/rec_{flag}_{k}"] = v
+                    val_res['recons'][f"rec_{flag}_{k}"] = v
+
+        val_res['trans'] = {}
         for target_flag, d in trans.items():
             for flag, res in d.items():
                 for k, v in res.items():
                     if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
                         continue
-                    val_res[f"val/{flag}_{target_flag}_{k}"] = v
+                    val_res['trans'][f"{flag}_{target_flag}_{k}"] = v
 
+        val_res['heatmap'] = {}
         if len(heatmap_dict) > 0:
             for k,v in heatmap_dict.items():
-                if k in ["heatmap", "heatmap_softmax"]:
-                    val_res[f"val/{k}"] = v
+                if v.__class__.__name__ == 'Figure':
+                    continue
                 else:
-                    val_res[f"val/{k} (avg. {cfg.top_k_batches} batches)"] = v
+                    val_res['heatmap'][f"{k} (avg. {cfg.top_k_batches} batches)"] = v
         
+        val_res['text_recons'] = {}
         if len(text_recons) > 0:
             for flag, res in text_recons.items():
                 for k,v in res.items():
-                    val_res[f"val/text_{k}"] = v
+                    val_res['text_recons'][f"text_{k}"] = v
 
+        val_res['text_trans'] = {}
         if len(text_trans) > 0:
             for target_flag, d in text_trans.items():
                 for flag, res in d.items():
                     for k, v in res.items():
                         if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
                             continue
-                        val_res[f"val/{flag}_{target_flag}_{k}"] = v
-        
-    print("Validation Results:")
-    for k, v in val_res.items():
-        print(f"{k}: {v}")
+                        val_res['text_trans'][f"{flag}_{target_flag}_{k}"] = v
+
+
+    if hasattr(cfg, 'use_ood') and cfg.use_ood:
+        fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}_ood.json'
+    else:
+        fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
+    with open(fnm, 'w') as f:
+        # human readable
+        f.write(json.dumps(val_res, indent=4))
 
 
 if __name__ == "__main__":

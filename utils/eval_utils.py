@@ -14,9 +14,9 @@ import seaborn as sns
 from utils.tokenization import get_tokenizer_max_length
 
 
-def text_to_embedding(text, flag, encoder, normalize_embeddings, max_length=32, device='cpu'):
+def text_to_embedding(text, flag, encoder, normalize_embeddings, max_length=32, device='cpu', batch_size=1024):
     max_length = min(get_tokenizer_max_length(encoder.tokenizer), max_length)
-    text = text[:max_length * 5]
+    text = [t[:max_length * 5] for t in text]
     output = {}
 
     tt = encoder.tokenizer(
@@ -31,13 +31,20 @@ def text_to_embedding(text, flag, encoder, normalize_embeddings, max_length=32, 
     if "token_name_idxs" in output: output.pop("token_name_idxs")
     batch = { k: v.to(device) for k,v in output.items()}
 
-    return process_batch(batch, {flag: encoder}, normalize_embeddings, device)[flag]
+    # process_batch in batches of size batch_size. process_batch[flag] is a tensor of embeddings
+    output_embs = []
+    for i in range(0, len(text), batch_size):
+        batch_slice = {k: v[i:i+batch_size] for k, v in batch.items()}
+        output_embs.append(process_batch(batch_slice, {flag: encoder}, normalize_embeddings, device)[flag])
+    return torch.cat(output_embs)
+
+    # return process_batch(batch, {flag: encoder}, normalize_embeddings, device)[flag]
 
 
 def generate_text(inverter, embeddings, max_seq_length=32):
     gen_kwargs = {
         "early_stopping": False,
-        "num_beams": 1,
+        "num_beams": 4,
         "do_sample": False,
         "no_repeat_ngram_size": 0,
         'min_length': 1,
@@ -307,7 +314,7 @@ def eval_loop_(
                 batch_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, heatmap_size, cfg.k)
                 batch_res.update(create_heatmap(translator, ins, cfg.unsup_emb, cfg.sup_emb, cfg.top_k_size, heatmap_size, cfg.k))
                 merge_dicts(heatmap_res, batch_res)
-            if i < text_batches and inverters is not None:
+            if i < text_batches and inverters is not None and (cfg.sup_emb in inverters or cfg.unsup_emb in inverters):
                 t_r_res, t_t_res = text_batch(ins, recons, translations, inverters, encoders, cfg.normalize_embeddings, cfg.max_seq_length, device)
                 merge_dicts(text_recon_res, t_r_res)
                 merge_dicts(text_translation_res, t_t_res)

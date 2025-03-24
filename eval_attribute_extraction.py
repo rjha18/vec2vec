@@ -18,30 +18,7 @@ from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings
 
-from datasets import load_dataset
-
-
-
-# # Parameters
-# config = toml.load(f'configs/{sys.argv[1]}.toml')
-# transform = config['transform']
-# general = config['general']
-
-# TYPE = transform['hypothesis_class']
-# E0_FLAG = transform.get('embedding_0', 'gte')
-# E1_FLAG = transform.get('embedding_1', 'gist')
-# DSET = transform.get('dataset', 'emotion')
-# NORMALIZE = transform['normalize']
-# PCA_DIMS = transform['pca_dims']
-# LAMBDA = transform.get('lambda', 0.)
-
-# SEED = general['seed']
-# SHUFFLES = general['shuffles']
-# N_SEEDS = general.get('n_seeds', [800])
-# DEVICE = general['device']
-# TOP_K = general.get('top_k', 10)
-# OUTPUT_DIR = general.get('output_dir', 'learned_outputs')
-# OUTPUT_DIR = f'{OUTPUT_DIR}/{DSET}/{TYPE}_multi/{E0_FLAG}_{E1_FLAG}'
+from datasets import load_dataset, load_from_disk
 
 
 def main():
@@ -88,11 +65,52 @@ def main():
     cfg.num_params = sum(x.numel() for x in translator.parameters())
     print("Number of parameters:", cfg.num_params)
 
-    # TODO: figure out dataset
-    # - texts = {text_id: text}
-    # - labels = {label_id: label}
-    # - matching = {text_id: [label_id]}
-    dset = load_dataset('cardiffnlp/tweet_topic_multilingual', 'en', num_proc=8)['test']
+    ### Tweets
+    # dset_name = 'cardiffnlp/tweet_topic_multilingual'
+    # dset = load_dataset('cardiffnlp/tweet_topic_multilingual', 'en', num_proc=8)['test']
+    # raw_labels = pd.read_csv('labels/tweet_topic_multilingual.csv')['label'].tolist()
+
+    ### ENRON
+    # dset_name = 'rishi-jha/filtered_enron'
+    # dset = load_dataset('rishi-jha/filtered_enron', split='train', num_proc=8).shuffle(seed=cfg.val_dataset_seed).select(range(1280))
+    # raw_labels = list(json.load(open('email_to_index.json', 'r')).keys())
+    # read from email_structure.txt
+    # email_structure = open('email_structure.txt', 'r').read()
+    # print(email_structure)
+    # raw_labels = [email_structure.format(l, l) for l in raw_labels]
+
+
+    ### MIMIC
+    # --- (1) Load dataset from cache ---
+    dset_name = 'mimic2'
+    split = "full_name"
+    dset = load_from_disk(dset_name)['evaluation'].shuffle(seed=cfg.val_dataset_seed)
+    print(len(dset))
+    dset = dset.select(range(2560))
+    raw_labels = pd.read_csv(f"mimic_side/{split}_mapping.csv").sort_values("index")[split].to_list()
+    num_classes = len(raw_labels)
+
+    def add_one_hot_label(example):
+        index = example[f"{split}_index"]
+        one_hot = [0] * num_classes
+        if index is not None:
+            one_hot[index] = 1
+        example["label"] = one_hot
+        return example
+
+    dset = dset.map(add_one_hot_label)
+    keep_columns = ["text", "label"]
+    dset = dset.remove_columns([col for col in dset.column_names if col not in keep_columns])
+
+
+    # Labels for attribute extraction
+    labels = {
+        cfg.sup_emb: text_to_embedding(raw_labels, cfg.sup_emb, sup_encs[cfg.sup_emb], cfg.normalize_embeddings, cfg.max_seq_length, accelerator.device),
+        cfg.unsup_emb: text_to_embedding(raw_labels, cfg.unsup_emb, unsup_enc[cfg.unsup_emb], cfg.normalize_embeddings, cfg.max_seq_length, accelerator.device)
+    }
+    print('Loaded labels...')
+    num_workers = get_num_proc()
+
     dset = MultiEncoderClassificationDataset(
         dataset=dset,
         encoders={ **unsup_enc, **sup_encs },
@@ -101,14 +119,6 @@ def main():
         max_length=cfg.max_seq_length,
         seed=cfg.sampling_seed,
     )
-    raw_labels = pd.read_csv('labels/tweet_topic_multilingual.csv')['label'].tolist()
-    labels = {
-        cfg.sup_emb: text_to_embedding(raw_labels, cfg.sup_emb, sup_encs[cfg.sup_emb], cfg.normalize_embeddings, cfg.max_seq_length, accelerator.device),
-        cfg.unsup_emb: text_to_embedding(raw_labels, cfg.unsup_emb, unsup_enc[cfg.unsup_emb], cfg.normalize_embeddings, cfg.max_seq_length, accelerator.device)
-    }
-
-    print(dset[0])
-    num_workers = get_num_proc()
 
     valloader = DataLoader(
         dset,
@@ -142,44 +152,58 @@ def main():
                 device=accelerator.device,
                 labels=labels
             )
+        val_res['recons'] = {}
         for flag, res in recons.items():
             for k, v in res.items():
                 if k == 'cos':
-                    val_res[f"val/rec_{flag}_{k}"] = v
+                    val_res['recons'][f"rec_{flag}_{k}"] = v
+
+        val_res['trans'] = {}
         for target_flag, d in trans.items():
             for flag, res in d.items():
                 for k, v in res.items():
                     if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
                         continue
-                    val_res[f"val/{flag}_{target_flag}_{k}"] = v
+                    val_res['trans'][f"{flag}_{target_flag}_{k}"] = v
 
+        val_res['heatmap'] = {}
         if len(heatmap_dict) > 0:
             for k,v in heatmap_dict.items():
-                if k in ["heatmap", "heatmap_softmax"]:
-                    val_res[f"val/{k}"] = v
+                # if v is a plt.Figure, skip it
+                if v.__class__.__name__ == 'Figure':
+                    # val_res['heatmap'][f"{k}"] = v
+                    continue
                 else:
-                    val_res[f"val/{k} (avg. {cfg.top_k_batches} batches)"] = v
-        
+                    val_res['heatmap'][f"{k} (avg. {cfg.top_k_batches} batches)"] = v
+
+        val_res['text_recons'] = {}
         if len(text_recons) > 0:
             for flag, res in text_recons.items():
                 for k,v in res.items():
-                    val_res[f"val/text_{k}"] = v
+                    val_res['text_recons'][f"text_{k}"] = v
 
+        val_res['text_trans'] = {}
         if len(text_trans) > 0:
             for target_flag, d in text_trans.items():
                 for flag, res in d.items():
                     for k, v in res.items():
                         if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
                             continue
-                        val_res[f"val/{flag}_{target_flag}_{k}"] = v
+                        val_res['text_trans'][f"{flag}_{target_flag}_{k}"] = v
         
+        val_res['classification'] = {}
         if len(classification) > 0:
             for k,v in classification.items():
-                val_res[f"val/{k}"] = v
-        
-    print("Validation Results:")
-    for k, v in val_res.items():
-        print(f"{k}: {v}")
+                val_res['classification'][f"{k}"] = v
+
+
+    # write dictionary to file in results including dataset name, embedding names
+    fnm = f'results/{dset_name.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
+    with open(fnm, 'w') as f:
+        # human readable
+        f.write(json.dumps(val_res, indent=4))
+    # save results to file
+
 
 
 if __name__ == "__main__":
