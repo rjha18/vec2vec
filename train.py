@@ -317,9 +317,9 @@ def main():
             unsupset = dset.select(range(min(cfg.unsup_points, len(dset))))
             supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
     else:
-        supset = load_from_disk('mimic2')['supervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
-        unsupset = load_from_disk('mimic2')['unsupervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
-        valset = load_from_disk('mimic2')['evaluation'].shuffle(cfg.val_dataset_seed).select(range(cfg.val_size))
+        supset = load_from_disk('data/mimic')['supervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
+        unsupset = load_from_disk('data/mimic')['unsupervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
+        valset = load_from_disk('data/mimic')['evaluation'].shuffle(cfg.val_dataset_seed).select(range(cfg.val_size))
 
         # for each, drop all columns but 'text' using remove_columns
         supset = supset.remove_columns([col for col in supset.column_names if col != 'text'])
