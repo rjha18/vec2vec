@@ -16,7 +16,6 @@ from translators.Discriminator import Discriminator
 
 # from eval import eval_model
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
-from utils.dist import get_rank, get_world_size
 from utils.eval_utils import eval_loop_
 from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
@@ -25,6 +24,7 @@ from utils.streaming_utils import load_streaming_embeddings, process_batch
 from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.wandb_logger import Logger
 
+from datasets import load_from_disk
 
 def training_loop_(
     save_dir, accelerator, gan, sup_gan, latent_gan, similarity_gan, translator, sup_dataloader, sup_iter, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
@@ -33,19 +33,15 @@ def training_loop_(
     if logger is None:
         logger = Logger(dummy=True)
 
-    if get_rank() == 0:
-        try:
-            wandb.watch(translator, log='all')
-        except:
-            pass
-    
+    wandb.watch(translator, log='all')
+
     if sup_iter is not None:
         dataloader_pbar = unsup_dataloader
     else:
         dataloader_pbar = zip(sup_dataloader, unsup_dataloader)
 
-    if get_rank() == 0:
-        dataloader_pbar = tqdm(dataloader_pbar, total=len(unsup_dataloader), desc="Training")
+
+    dataloader_pbar = tqdm(dataloader_pbar, total=len(unsup_dataloader), desc="Training")
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
 
@@ -211,8 +207,7 @@ def training_loop_(
             for metric, value in metrics.items():
                 logger.logkv(metric, value)
             logger.dumpkvs(force=(hasattr(cfg, 'force_dump') and cfg.force_dump))
-            if get_rank() == 0:
-                dataloader_pbar.set_postfix(metrics)
+            dataloader_pbar.set_postfix(metrics)
 
     with open(save_dir + 'config.toml', 'w') as f:
         toml.dump(cfg.__dict__, f)
@@ -232,10 +227,10 @@ def main():
         print("Note: bf16 is not available on this hardware! Reverting to fp16 and setting accumulation steps to 1.")
 
     # set seeds
-    random.seed(cfg.seed + get_rank())
-    torch.manual_seed(cfg.seed + get_rank())
-    np.random.seed(cfg.seed + get_rank())
-    torch.cuda.manual_seed(cfg.seed + get_rank())
+    random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    torch.cuda.manual_seed(cfg.seed)
 
     use_val_set = hasattr(cfg, 'val_size')
 
@@ -261,7 +256,6 @@ def main():
 
     print("Running Experiment:", cfg.wandb_name)
 
-    dset = load_streaming_embeddings(cfg.dataset)
 
     sup_encs = {
         cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
@@ -294,7 +288,6 @@ def main():
     cfg.num_params = sum(x.numel() for x in translator.parameters())
     print("Number of parameters:", cfg.num_params)
     print("Number of *trainable* parameters:", sum(p.numel() for p in translator.parameters() if p.requires_grad))
-    print("Number of training datapoints:", len(dset))
     print(translator)
 
     logger = Logger(
@@ -305,26 +298,34 @@ def main():
     )
 
     num_workers = get_num_proc()
-    print(f"Rank {get_rank()} using {num_workers} workers and {len(dset)} datapoints")
-    if get_world_size() > 1:
-        max_num_datapoints = len(dset) - (len(dset) % (cfg.bs * get_world_size()))
-        dset = dset.select(range(max_num_datapoints))
-        print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
+    
+    if cfg.dataset != 'mimic':
+        dset = load_streaming_embeddings(cfg.dataset)
+        print(f"Using {num_workers} workers and {len(dset)} datapoints")
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
-    dset = dset_dict["train"]
-    valset = dset_dict["test"]
+        dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
+        dset = dset_dict["train"]
+        valset = dset_dict["test"]
 
-    assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
-    dset = dset.shuffle(seed=cfg.train_dataset_seed)
-    if hasattr(cfg, 'num_points'):
-        assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
-        supset = dset.select(range(cfg.num_points))
-        unsupset = dset.select(range(cfg.num_points, cfg.num_points * 2))
-    elif hasattr(cfg, 'unsup_points'):
-        unsupset = dset.select(range(min(cfg.unsup_points, len(dset))))
-        supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+        assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
+        dset = dset.shuffle(seed=cfg.train_dataset_seed)
+        if hasattr(cfg, 'num_points'):
+            assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
+            supset = dset.select(range(cfg.num_points))
+            unsupset = dset.select(range(cfg.num_points, cfg.num_points * 2))
+        elif hasattr(cfg, 'unsup_points'):
+            unsupset = dset.select(range(min(cfg.unsup_points, len(dset))))
+            supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+    else:
+        supset = load_from_disk('mimic2')['supervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
+        unsupset = load_from_disk('mimic2')['unsupervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
+        valset = load_from_disk('mimic2')['evaluation'].shuffle(cfg.val_dataset_seed).select(range(cfg.val_size))
 
+        # for each, drop all columns but 'text' using remove_columns
+        supset = supset.remove_columns([col for col in supset.column_names if col != 'text'])
+        unsupset = unsupset.remove_columns([col for col in unsupset.column_names if col != 'text'])
+        valset = valset.remove_columns([col for col in valset.column_names if col != 'text'])
+        
 
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
@@ -438,7 +439,7 @@ def main():
     max_num_epochs = int(np.ceil(cfg.epochs))
     steps_per_epoch = len(supset) // cfg.bs
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
-    warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100) * get_world_size()
+    warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100)
 
     def lr_lambda(step):
         if step < warmup_length:
@@ -518,7 +519,7 @@ def main():
         sup_iter = iter(sup_dataloader)
 
     for epoch in range(max_num_epochs):
-        if use_val_set and get_rank() == 0:
+        if use_val_set:
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
@@ -547,7 +548,7 @@ def main():
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:
-            max_num_batches = max(1, (cfg.epochs - epoch) * len(supset) // cfg.bs // get_world_size())
+            max_num_batches = max(1, (cfg.epochs - epoch) * len(supset) // cfg.bs)
             print(f"Setting max_num_batches to {max_num_batches}")
 
         sup_iter = training_loop_(
