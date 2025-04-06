@@ -34,6 +34,8 @@ def load_encoder(model_flag, device: str = 'cpu', max_seq_length: int = 32, mixe
             model_kwargs['torch_dtype'] = torch.bfloat16
         elif mixed_precision == 'fp16':
             model_kwargs['torch_dtype'] = torch.float16
+        elif mixed_precision == 'no':
+            model_kwargs['torch_dtype'] = torch.float32
         else:
             raise ValueError(f"Unknown mixed precision flag {mixed_precision}")
     else:
