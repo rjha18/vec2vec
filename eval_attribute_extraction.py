@@ -43,7 +43,7 @@ def main():
     # https://github.com/huggingface/transformers/issues/26548
     accelerator.dataloader_config.dispatch_batches = False
 
-    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)}
+    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' else None)}
     encoder_dims = {cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])}
     translator = load_n_translator(cfg, encoder_dims)
 
@@ -51,7 +51,7 @@ def main():
     assert cfg.sup_emb != cfg.unsup_emb
 
     unsup_enc = {
-        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
+        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' else None)
     }
     unsup_dim = {
         cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
@@ -66,9 +66,9 @@ def main():
     print("Number of parameters:", cfg.num_params)
 
     ### Tweets
-    # dset_name = 'cardiffnlp/tweet_topic_multilingual'
-    # dset = load_dataset('cardiffnlp/tweet_topic_multilingual', 'en', num_proc=8)['test']
-    # raw_labels = pd.read_csv('labels/tweet_topic_multilingual.csv')['label'].tolist()
+    dset_name = 'cardiffnlp/tweet_topic_multilingual'
+    dset = load_dataset('cardiffnlp/tweet_topic_multilingual', 'en', num_proc=8)['test']
+    raw_labels = pd.read_csv('labels/tweet_topic_multilingual.csv')['label'].tolist()
 
     ### ENRON
     # dset_name = 'rishi-jha/filtered_enron'
@@ -82,25 +82,25 @@ def main():
 
     ### MIMIC
     # --- (1) Load dataset from cache ---
-    dset_name = 'mimic2'
-    split = "full_name"
-    dset = load_from_disk(dset_name)['evaluation'].shuffle(seed=cfg.val_dataset_seed)
-    print(len(dset))
-    dset = dset.select(range(2560))
-    raw_labels = pd.read_csv(f"mimic_side/{split}_mapping.csv").sort_values("index")[split].to_list()
-    num_classes = len(raw_labels)
+    # dset_name = 'data/mimic'
+    # split = "full_name"
+    # dset = load_from_disk(dset_name)['evaluation'].shuffle(seed=cfg.val_dataset_seed)
+    # print(len(dset))
+    # dset = dset.select(range(2560))
+    # raw_labels = pd.read_csv(f"data/mimic/{split}_mapping.csv").sort_values("index")[split].to_list()
+    # num_classes = len(raw_labels)
 
-    def add_one_hot_label(example):
-        index = example[f"{split}_index"]
-        one_hot = [0] * num_classes
-        if index is not None:
-            one_hot[index] = 1
-        example["label"] = one_hot
-        return example
+    # def add_one_hot_label(example):
+    #     index = example[f"{split}_index"]
+    #     one_hot = [0] * num_classes
+    #     if index is not None:
+    #         one_hot[index] = 1
+    #     example["label"] = one_hot
+    #     return example
 
-    dset = dset.map(add_one_hot_label)
-    keep_columns = ["text", "label"]
-    dset = dset.remove_columns([col for col in dset.column_names if col not in keep_columns])
+    # dset = dset.map(add_one_hot_label)
+    # keep_columns = ["text", "label"]
+    # dset = dset.remove_columns([col for col in dset.column_names if col not in keep_columns])
 
 
     # Labels for attribute extraction

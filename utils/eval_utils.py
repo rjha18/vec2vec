@@ -234,21 +234,32 @@ def create_heatmap(translator, ins, tgt_emb, src_emb, top_k_size, heatmap_size=N
     return res
 
 
-def top_k_accuracy_multi(predictions: torch.Tensor, ground_truth: torch.Tensor) -> float:
-    indices = ground_truth.nonzero()  # (num_labels, 2) where columns are (row_idx, class_idx)
-
-    # Group labels by row index
-    true_labels = [[] for _ in range(ground_truth.shape[0])]
-    for row, label in zip(indices[:, 0], indices[:, 1]):
-        true_labels[row.item()].append(label.item())
-
-    # Check if any of the top-k predictions match a ground truth label
-    correct_predictions = torch.tensor([
-        any(pred in true_labels[i] for pred in predictions[i]) for i in range(len(predictions))
-    ], dtype=torch.float)
+def compute_topk_accuracy_and_avg_rank(sorted_indices: torch.Tensor, ground_truth: torch.Tensor, k: int):
+    """
+    Given pre-sorted indices (in descending order) for each sample and the ground truth,
+    compute both the top-k accuracy and the average rank of the ground truth labels.
     
-    # Compute mean accuracy
-    return correct_predictions.mean().item()
+    top-k accuracy: For each sample, if any ground truth label is in the top k predictions, count it as correct.
+    average rank: For each ground truth label, determine its rank in the sorted predictions (1-indexed) and average over the batch.
+    """
+    n = sorted_indices.shape[0]
+    topk_correct = 0
+    all_ranks = []
+    for i in range(n):
+        # Get the indices for ground truth labels for this sample.
+        gt_indices = (ground_truth[i] == 1).nonzero(as_tuple=True)[0]
+        # Get top-k predictions for this sample.
+        top_k_preds = sorted_indices[i, :k]
+        # If any ground truth label is in top-k predictions, count this sample as correct.
+        if any(label.item() in top_k_preds.tolist() for label in gt_indices):
+            topk_correct += 1
+        # For each ground truth label, compute its rank (1-indexed) in the full sorted list.
+        for label in gt_indices:
+            rank = (sorted_indices[i] == label).nonzero(as_tuple=True)[0].item() + 1
+            all_ranks.append(rank)
+    topk_accuracy = topk_correct / n
+    avg_rank = sum(all_ranks) / len(all_ranks) if all_ranks else 0.0
+    return topk_accuracy, avg_rank
 
 
 def top_k_p_r(predictions: np.ndarray, ground_truth: np.ndarray, k: int):
@@ -271,18 +282,31 @@ def classification_batch(ins, translations, labels, gt_mapping, k=1):
     for target_model in labels.keys():
         labels_norm = F.normalize(labels[target_model], p=2, dim=1)
         ins_norm = F.normalize(ins[target_model], p=2, dim=1)
-        sims = (ins_norm @ labels_norm.T)
-        top_k_preds = torch.argsort(sims, axis=1)[:, -k:]
-        res[f'{target_model}_top_{k}_acc'] = top_k_accuracy_multi(top_k_preds, gt_mapping)
-        p, r = top_k_p_r(top_k_preds.cpu().numpy(), gt_mapping.cpu().numpy(), k)
+        sims = ins_norm @ labels_norm.T
+        # Compute sorted indices once (in descending order)
+        sorted_indices = torch.argsort(sims, dim=1, descending=True)
+        topk_preds = sorted_indices[:, :k]
+        
+        # Compute top-k accuracy and average rank in one pass.
+        acc, avg_rank = compute_topk_accuracy_and_avg_rank(sorted_indices, gt_mapping, k)
+        res[f'{target_model}_top_{k}_acc'] = acc
+        res[f'{target_model}_avg_rank'] = avg_rank
+        
+        p, r = top_k_p_r(topk_preds.cpu().numpy(), gt_mapping.cpu().numpy(), k)
         res[f'{target_model}_P@{k}'] = p
         res[f'{target_model}_R@{k}'] = r
+        
         for model, trans in translations[target_model].items():
             trans_norm = F.normalize(trans, p=2, dim=1)
-            sims = (trans_norm @ labels_norm.T)
-            top_k_preds = torch.argsort(sims, axis=1)[:, -k:]
-            res[f'{model}_{target_model}_top_{k}_acc'] = top_k_accuracy_multi(top_k_preds, gt_mapping)
-            p, r = top_k_p_r(top_k_preds.cpu().numpy(), gt_mapping.cpu().numpy(), k)
+            sims = trans_norm @ labels_norm.T
+            sorted_indices = torch.argsort(sims, dim=1, descending=True)
+            topk_preds = sorted_indices[:, :k]
+            
+            acc, avg_rank = compute_topk_accuracy_and_avg_rank(sorted_indices, gt_mapping, k)
+            res[f'{model}_{target_model}_top_{k}_acc'] = acc
+            res[f'{model}_{target_model}_avg_rank'] = avg_rank
+            
+            p, r = top_k_p_r(topk_preds.cpu().numpy(), gt_mapping.cpu().numpy(), k)
             res[f'{model}_{target_model}_P@{k}'] = p
             res[f'{model}_{target_model}_R@{k}'] = r
 
@@ -290,7 +314,7 @@ def classification_batch(ins, translations, labels, gt_mapping, k=1):
 
 
 def eval_loop_(
-    cfg, translator, encoders, iter, inverters=None, pbar=None, device='cpu', labels=None
+    cfg, translator, encoders, data_iter, inverters=None, pbar=None, device='cpu', labels=None
 ):
     recon_res = {}
     translation_res = {}
@@ -302,7 +326,7 @@ def eval_loop_(
     top_k_batches = cfg.top_k_batches if hasattr(cfg, 'top_k_batches') else 0
     text_batches = cfg.text_batches if hasattr(cfg, 'text_batches') else 0
     with torch.no_grad():
-        for i, batch in enumerate(iter):
+        for i, batch in enumerate(data_iter):
             ins = process_batch(batch, encoders, cfg.normalize_embeddings, device)
             recons, translations = translator(ins, include_reps=False)
             

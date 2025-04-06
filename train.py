@@ -221,7 +221,7 @@ def main():
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**{k: v for d in cfg.values() for k, v in d.items()}, **unknown_cfg})
 
-    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
+    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
         cfg.mixed_precision = 'fp16'
         cfg.gradient_accumulation_steps = 1
         print("Note: bf16 is not available on this hardware! Reverting to fp16 and setting accumulation steps to 1.")
@@ -235,7 +235,7 @@ def main():
     use_val_set = hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
-        mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None,
+        mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' else None,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps
     )
     # https://github.com/huggingface/transformers/issues/26548

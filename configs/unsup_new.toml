@@ -18,7 +18,7 @@ noise_level = 0.0
 style = 'res_mlp'
 norm_style = 'batch'
 depth = 3
-transform_depth = 4
+transform_depth = 6
 d_adapter = 1024
 d_hidden = 1024
 d_transform = 1024
@@ -27,14 +27,14 @@ use_residual_adapters = true
 
 [discriminator]
 gan_style = "least_squares"
-disc_depth = 5
+disc_depth = 6
 disc_dim = 1024
 use_residual = true
 
 [train]
 bs = 256
 gradient_accumulation_steps = 1
-lr = 2e-5
+lr = 5e-5
 no_scheduler = true
 max_grad_norm = 1000.0
 loss_coefficient_reverse_rec = 0.0
@@ -47,12 +47,12 @@ loss_coefficient_r1_penalty = 0.0
 warmup_length = 2000
 
 [gan]
-disc_lr = 1e-5
+disc_lr = 2e-5
 eps = 6.25e-10
 smooth = 0.9
 loss_coefficient_disc = 1.0
 loss_coefficient_gen = 1.0
-loss_coefficient_latent_gen = 1.0
+loss_coefficient_latent_gen = 10.0
 loss_coefficient_similarity_gen = 0.0
 
 [eval]
