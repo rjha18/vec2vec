@@ -358,18 +358,25 @@ def eval_loop_(
 
 
 class EarlyStopper:
-    def __init__(self, patience=1, min_delta=0):
+    def __init__(self, patience=1, min_delta=0, increase=True):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
-        self.max_val_cos = 0
+        self.opt_val = float('-inf') if increase else float('inf')
+        self.increase = increase
 
-    def early_stop(self, val_cos):
-        if val_cos > (self.max_val_cos + self.min_delta):
-            self.max_val_cos = val_cos
+    def early_stop(self, val):
+        if self.increase and val > (self.opt_val + self.min_delta):
+            self.opt_val = val
+            self.counter = 0
+        elif not self.increase and val < (self.opt_val - self.min_delta):
+            self.opt_val = val
             self.counter = 0
         else:
             self.counter += 1
             if self.counter >= self.patience:
                 return True
         return False
+
+    def __call__(self, val):
+        return self.early_stop(val)
