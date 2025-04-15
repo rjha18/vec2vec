@@ -517,7 +517,7 @@ def main():
         sup_iter = iter(sup_dataloader)
 
     if hasattr(cfg, 'val_size') and hasattr(cfg, 'patience') and hasattr(cfg, 'min_delta'):
-        early_stopper = EarlyStopper(patience=cfg.patience, min_delta=cfg.min_delta, increase=True)
+        early_stopper = EarlyStopper(patience=cfg.patience, min_delta=cfg.min_delta, increase=False)
         early_stopping = True
     else:
         early_stopping = False
