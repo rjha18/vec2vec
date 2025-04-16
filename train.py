@@ -16,7 +16,7 @@ from translators.Discriminator import Discriminator
 
 # from eval import eval_model
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
-from utils.eval_utils import eval_loop_
+from utils.eval_utils import EarlyStopper, eval_loop_
 from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
@@ -470,8 +470,6 @@ def main():
     )
     sup_dataloader, unsup_dataloader = accelerator.prepare(sup_dataloader, unsup_dataloader)
 
-    best_model = None
-    best_disc = None
 
     if cfg.gan_style == "vanilla":
         gan_cls = VanillaGAN
@@ -518,6 +516,12 @@ def main():
     if hasattr(cfg, 'unsup_points'):
         sup_iter = iter(sup_dataloader)
 
+    if hasattr(cfg, 'val_size') and hasattr(cfg, 'patience') and hasattr(cfg, 'min_delta'):
+        early_stopper = EarlyStopper(patience=cfg.patience, min_delta=cfg.min_delta, increase=False)
+        early_stopping = True
+    else:
+        early_stopping = False
+
     for epoch in range(max_num_epochs):
         if use_val_set:
             with torch.no_grad(), accelerator.autocast():
@@ -544,6 +548,16 @@ def main():
                             val_res[f"val/{k} (avg. {cfg.top_k_batches} batches)"] = v
                 wandb.log(val_res)
                 translator.train()
+
+            if epoch >= cfg.min_epochs and early_stopping:
+                score = np.mean([v for k, v in val_res.items() if 'top_rank' in k])
+
+                if early_stopper.early_stop(score):
+                    print("Early stopping...")
+                    break
+                if early_stopper.counter == 0 and score < early_stopper.opt_val:
+                    print(f"Saving model (counter = {early_stopper.counter})... {score} < {early_stopper.opt_val} is the best score so far...")
+                    save_everything(cfg, translator, opt, [gan, sup_gan, latent_gan, similarity_gan], save_dir)
 
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
@@ -573,11 +587,6 @@ def main():
 
     with open(save_dir + 'config.toml', 'w') as f:
         toml.dump(cfg.__dict__, f)
-    # save model
-    best_model = best_model if best_model is not None else accelerator.unwrap_model(translator).state_dict()
-    best_disc = best_disc if best_disc is not None else disc.state_dict()
-    torch.save(best_model, model_save_dir)
-    torch.save(best_disc, disc_save_dir)
 
 
 if __name__ == "__main__":
