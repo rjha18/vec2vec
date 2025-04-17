@@ -119,13 +119,17 @@ class MultiEncoderClassificationDataset(MultiencoderTokenizedDataset):
             batch_size: int,
             max_length: int, 
             seed: int = 42,
+            return_texts: bool = False,
         ):
         super().__init__(dataset, encoders, n_embs_per_batch, batch_size, max_length, seed)
         self.labels = None
         self.label_texts = None
         self.encoders = encoders
+        self.return_texts = return_texts
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         out = super().__getitem__(idx)
         out["label"] = self.dataset[int(self.new_indices[idx])]["label"]
+        if self.return_texts:
+            out["text"] = self.dataset[int(self.new_indices[idx])]["text"]
         return out
