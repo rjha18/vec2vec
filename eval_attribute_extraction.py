@@ -65,42 +65,43 @@ def main():
     cfg.num_params = sum(x.numel() for x in translator.parameters())
     print("Number of parameters:", cfg.num_params)
 
-    ### Tweets
-    dset_name = 'cardiffnlp/tweet_topic_multilingual'
-    dset = load_dataset('cardiffnlp/tweet_topic_multilingual', 'en', num_proc=8)['test']
-    raw_labels = pd.read_csv('labels/tweet_topic_multilingual.csv')['label'].tolist()
+    if hasattr(cfg, 'val_dataset') and cfg.val_dataset == 'tweets':
+        ### Tweets
+        dset_name = 'cardiffnlp/tweet_topic_multilingual'
+        dset = load_dataset('cardiffnlp/tweet_topic_multilingual', 'en', num_proc=8)['test']
+        raw_labels = pd.read_csv('labels/tweet_topic_multilingual.csv')['label'].tolist()
+    elif hasattr(cfg, 'val_dataset') and cfg.val_dataset == 'enron':
+        ### ENRON
+        dset_name = 'rishi-jha/filtered_enron'
+        dset = load_dataset('rishi-jha/filtered_enron', split='train', num_proc=8).shuffle(seed=cfg.val_dataset_seed).select(range(1280))
+        raw_labels = list(json.load(open('email_to_index.json', 'r')).keys())
+        # read from email_structure.txt
+        email_structure = open('email_structure.txt', 'r').read()
+        print(email_structure)
+        raw_labels = [email_structure.format(l, l) for l in raw_labels]
+    elif hasattr(cfg, 'val_dataset') and cfg.val_dataset == 'mimic':
+        ### MIMIC
+        dset_name = 'data/mimic'
+        split = "full_name"
+        dset = load_from_disk(dset_name)['evaluation'].shuffle(seed=cfg.val_dataset_seed)
+        print(len(dset))
+        dset = dset.select(range(2560))
+        raw_labels = pd.read_csv(f"data/mimic/{split}_mapping.csv").sort_values("index")[split].to_list()
+        num_classes = len(raw_labels)
 
-    ### ENRON
-    # dset_name = 'rishi-jha/filtered_enron'
-    # dset = load_dataset('rishi-jha/filtered_enron', split='train', num_proc=8).shuffle(seed=cfg.val_dataset_seed).select(range(1280))
-    # raw_labels = list(json.load(open('email_to_index.json', 'r')).keys())
-    # read from email_structure.txt
-    # email_structure = open('email_structure.txt', 'r').read()
-    # print(email_structure)
-    # raw_labels = [email_structure.format(l, l) for l in raw_labels]
+        def add_one_hot_label(example):
+            index = example[f"{split}_index"]
+            one_hot = [0] * num_classes
+            if index is not None:
+                one_hot[index] = 1
+            example["label"] = one_hot
+            return example
 
-
-    ### MIMIC
-    # --- (1) Load dataset from cache ---
-    # dset_name = 'data/mimic'
-    # split = "full_name"
-    # dset = load_from_disk(dset_name)['evaluation'].shuffle(seed=cfg.val_dataset_seed)
-    # print(len(dset))
-    # dset = dset.select(range(2560))
-    # raw_labels = pd.read_csv(f"data/mimic/{split}_mapping.csv").sort_values("index")[split].to_list()
-    # num_classes = len(raw_labels)
-
-    # def add_one_hot_label(example):
-    #     index = example[f"{split}_index"]
-    #     one_hot = [0] * num_classes
-    #     if index is not None:
-    #         one_hot[index] = 1
-    #     example["label"] = one_hot
-    #     return example
-
-    # dset = dset.map(add_one_hot_label)
-    # keep_columns = ["text", "label"]
-    # dset = dset.remove_columns([col for col in dset.column_names if col not in keep_columns])
+        dset = dset.map(add_one_hot_label)
+        keep_columns = ["text", "label"]
+        dset = dset.remove_columns([col for col in dset.column_names if col not in keep_columns])
+    else:
+        raise ValueError(f"Unknown dataset {cfg.val_dataset}")
 
 
     # Labels for attribute extraction

@@ -2,6 +2,10 @@ __pycache__/
 tmp_trainer
 legacy
 *.pyc
+*.pkl
+*.png
+*.parquet
+*.sh
 checkpoints*
 slurm
 out
@@ -11,9 +15,9 @@ embeddings/
 log_submitit/
 model_weights/
 datasets/
-finetuning_unsupervised/
 media/
 wandb
-finetuning_unsupervised
+finetuning_unsupervised*
+final_models/
 old*
 data/
