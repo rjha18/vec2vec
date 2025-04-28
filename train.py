@@ -33,7 +33,7 @@ def training_loop_(
     if logger is None:
         logger = Logger(dummy=True)
 
-    wandb.watch(translator, log='all')
+    # wandb.watch(translator, log='all')
 
     if sup_iter is not None:
         dataloader_pbar = unsup_dataloader
