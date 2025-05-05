@@ -100,8 +100,7 @@ class MultiencoderTokenizedDataset(torch.utils.data.Dataset):
                 max_length=max_length,
                 return_tensors="pt",
             )
-            if get_tokenizer_max_length(self.tokenizers[tok_name]) == 77:
-                # TODO: Use a less hacky way to figure out that this is a CLIP model :-)
+            if tok_name == 'clip':
                 tt["image_text_info"] = torch.tensor(1)
 
             output.update({f"{tok_name}_{key}": value for key, value in tt.items()})
