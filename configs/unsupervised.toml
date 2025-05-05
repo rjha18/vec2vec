@@ -69,7 +69,7 @@ heatmap_size = 64
 
 [logging]
 use_wandb = true
-wandb_project = 'unsupervised_limited'
+wandb_project = 'unsupervised_disc'
 wandb_name = 'unsupervised'
 load_dir = './finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
 save_dir = './finetuning_unsupervised/{}/'

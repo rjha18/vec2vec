@@ -1,0 +1,12 @@
+[general]
+seed = 5
+sampling_seed = 5
+train_dataset_seed = 10
+val_dataset_seed = 42
+mixed_precision = 'fp16'
+dataset = "nq"
+val_size = 4096
+num_points = 1000000  # for set consistency
+val_bs = 1024
+max_seq_length = 64
+normalize_embeddings = true
