@@ -68,7 +68,7 @@ def main(data_dir, cache_dir, output_jsonl, chunksize):
     path_names = os.path.join(data_dir, "SUBJECT_ID_to_NAME.csv")
     path_medcat = os.path.join(data_dir, "SUBJECT_ID_to_MedCAT.csv")
     path_medcat_desc = os.path.join(data_dir, "MedCAT_Descriptions.csv")
-    path_notes = os.path.join(data_dir, "SUBJECT_ID_to_NOTES_1b.csv")
+    path_notes = os.path.join(data_dir, "SUBJECT_ID_to_NOTES_templates.csv")
     
     print("Loading names from:", path_names)
     df_names = pd.read_csv(path_names)
