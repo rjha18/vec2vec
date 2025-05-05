@@ -57,12 +57,13 @@ def main():
     }
     translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
 
-    assert cfg.unsup_emb not in sup_encs
-    assert cfg.unsup_emb in translator.in_adapters
-    assert cfg.unsup_emb in translator.out_adapters
+    if cfg.style != 'identity':
+        assert cfg.unsup_emb not in sup_encs
+        assert cfg.unsup_emb in translator.in_adapters
+        assert cfg.unsup_emb in translator.out_adapters
 
-    cfg.num_params = sum(x.numel() for x in translator.parameters())
-    print("Number of parameters:", cfg.num_params)
+        cfg.num_params = sum(x.numel() for x in translator.parameters())
+        print("Number of parameters:", cfg.num_params)
 
     dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
     dset = dset_dict["train"]
@@ -100,9 +101,10 @@ def main():
     )
     evalloader = accelerator.prepare(evalloader)
 
-    assert hasattr(cfg, 'load_dir')
-    print(f"Loading models from {argv[1]}...")
-    translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
+    if cfg.style != 'identity':
+        assert hasattr(cfg, 'load_dir')
+        print(f"Loading models from {argv[1]}...")
+        translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
 
     translator = accelerator.prepare(translator)
     inverters = get_inverters(["gtr"], accelerator.device)
@@ -156,8 +158,9 @@ def main():
                             continue
                         val_res['text_trans'][f"{flag}_{target_flag}_{k}"] = v
 
-
-    if hasattr(cfg, 'use_ood') and cfg.use_ood:
+    if cfg.style == 'identity':
+        fnm = f'results/baseline_{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
+    elif hasattr(cfg, 'use_ood') and cfg.use_ood:
         fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}_ood.json'
     else:
         fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'

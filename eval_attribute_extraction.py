@@ -58,12 +58,13 @@ def main():
     }
     translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
 
-    assert cfg.unsup_emb not in sup_encs
-    assert cfg.unsup_emb in translator.in_adapters
-    assert cfg.unsup_emb in translator.out_adapters
+    if cfg.style != 'identity':
+        assert cfg.unsup_emb not in sup_encs
+        assert cfg.unsup_emb in translator.in_adapters
+        assert cfg.unsup_emb in translator.out_adapters
 
-    cfg.num_params = sum(x.numel() for x in translator.parameters())
-    print("Number of parameters:", cfg.num_params)
+        cfg.num_params = sum(x.numel() for x in translator.parameters())
+        print("Number of parameters:", cfg.num_params)
 
     if hasattr(cfg, 'val_dataset') and cfg.val_dataset == 'tweets':
         ### Tweets
@@ -79,21 +80,30 @@ def main():
         email_structure = open('email_structure.txt', 'r').read()
         print(email_structure)
         raw_labels = [email_structure.format(l, l) for l in raw_labels]
-    elif hasattr(cfg, 'val_dataset') and cfg.val_dataset == 'mimic':
+    elif hasattr(cfg, 'val_dataset') and 'mimic' in cfg.val_dataset:
         ### MIMIC
-        dset_name = 'data/mimic'
-        split = "full_name"
-        dset = load_from_disk(dset_name)['evaluation'].shuffle(seed=cfg.val_dataset_seed)
-        print(len(dset))
-        dset = dset.select(range(2560))
-        raw_labels = pd.read_csv(f"data/mimic/{split}_mapping.csv").sort_values("index")[split].to_list()
+        if cfg.val_dataset == 'mimic':
+            dset_name = 'data/mimic'
+        elif cfg.val_dataset == 'mimic_templates':
+            dset_name = 'data/mimic_templates'
+        split = "medcat"
+        dset = load_from_disk(dset_name)['unsupervised'].shuffle(seed=cfg.val_dataset_seed)
+        dset = dset.select(range(cfg.val_size))
+        raw_labels = pd.read_csv(f"data/mimic/{split}_mapping.csv").sort_values("index")[split + '_description' if split == 'medcat' else ''].to_list()
         num_classes = len(raw_labels)
 
         def add_one_hot_label(example):
-            index = example[f"{split}_index"]
+            index = example[f"{split}" + "_indices" if split == 'medcat' else "_index"]
             one_hot = [0] * num_classes
-            if index is not None:
+
+            if isinstance(index, list):
+                for i in index:
+                    one_hot[i] = 1
+            elif isinstance(index, int):
                 one_hot[index] = 1
+            else:
+                raise ValueError(f"Unknown index type {type(index)}")
+
             example["label"] = one_hot
             return example
 
@@ -133,9 +143,10 @@ def main():
     )
     valloader = accelerator.prepare(valloader)
 
-    assert hasattr(cfg, 'load_dir')
-    print(f"Loading models from {argv[1]}...")
-    translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
+    if cfg.style != 'identity':
+        assert hasattr(cfg, 'load_dir')
+        print(f"Loading models from {argv[1]}...")
+        translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
 
     translator = accelerator.prepare(translator)
     inverters = get_inverters(["gtr"], accelerator.device)
@@ -199,7 +210,10 @@ def main():
 
 
     # write dictionary to file in results including dataset name, embedding names
-    fnm = f'results/{dset_name.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
+    if cfg.style == 'identity':
+        fnm = f'results/baseline_{dset_name.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
+    else:
+        fnm = f'results/{dset_name.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
     with open(fnm, 'w') as f:
         # human readable
         f.write(json.dumps(val_res, indent=4))
