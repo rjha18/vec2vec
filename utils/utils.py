@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from huggingface_hub.file_download import hf_hub_download
 from safetensors.torch import load_file
 
+from translators.IdentityBaseline import IdentityBaseline
 from utils.embeddings import load_and_process_embeddings_from_idxs
 
 from translators.MLPWithResidual import MLPWithResidual
@@ -21,6 +22,8 @@ from vec2text.models import InversionModel
 
 
 def load_n_translator(cfg, encoder_dims):
+    if cfg.style == 'identity':
+        return IdentityBaseline(encoder_dims)
     if cfg.style == 'linear':
         return LinearTranslator(
             encoder_dims,
