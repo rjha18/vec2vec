@@ -19,6 +19,10 @@ HF_FLAGS = {
     'jina': 'jinaai/jina-embeddings-v2-base-en',
     'bert-nli': 'sentence-transformers/bert-base-nli-mean-tokens',
     'dpr': 'sentence-transformers/facebook-dpr-ctx_encoder-single-nq-base',
+    'granite': 'ibm-granite/granite-embedding-278m-multilingual',
+    'modernbert': 'answerdotai/ModernBERT-base',
+    'modernbert-large': 'answerdotai/ModernBERT-large',
+    'nomicbert': 'nomic-ai/nomic-bert-2048',
 }
 
 
