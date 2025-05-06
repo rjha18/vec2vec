@@ -47,12 +47,13 @@ def load_encoder(model_flag, device: str = 'cpu', mixed_precision: Optional[str]
 
     # special loading for gpt-2
     if model_flag.startswith("gpt2"):
+        print(f"Loading gpt-2 model {model_flag}")
         transformer = models.Transformer("sentence-transformers/all-MiniLM-L6-v2", max_seq_length=256)
         normalize = models.Normalize()
         if model_flag == "gpt2_mean":
             pooling = models.Pooling(transformer.get_word_embedding_dimension(), pooling_mode="mean")
         elif model_flag == "gpt2_last":
-            pooling = models.Pooling(transformer.get_word_embedding_dimension(), pooling_mode="mean")
+            pooling = models.Pooling(transformer.get_word_embedding_dimension(), pooling_mode="lasttoken")
         else:
             raise ValueError(f"Unknown gpt-2 model {model_flag}")
         encoder = SentenceTransformer(modules=[transformer, pooling, normalize])
