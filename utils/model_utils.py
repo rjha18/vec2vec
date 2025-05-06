@@ -26,7 +26,7 @@ HF_FLAGS = {
 }
 
 
-def load_encoder(model_flag, device: str = 'cpu', max_seq_length: int = 32, mixed_precision: str = None):
+def load_encoder(model_flag, device: str = 'cpu', mixed_precision: str = None):
     if model_flag in HF_FLAGS:
         f = HF_FLAGS[model_flag]
     else:
@@ -46,7 +46,6 @@ def load_encoder(model_flag, device: str = 'cpu', max_seq_length: int = 32, mixe
         model_kwargs['torch_dtype'] = torch.float32
     
     encoder = SentenceTransformer(f, device=device, trust_remote_code=True, model_kwargs=model_kwargs)
-    encoder.max_seq_length = max_seq_length
     return encoder.eval()
 
 

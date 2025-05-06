@@ -10,8 +10,6 @@ from huggingface_hub.file_download import hf_hub_download
 from safetensors.torch import load_file
 
 from translators.IdentityBaseline import IdentityBaseline
-from utils.embeddings import load_and_process_embeddings_from_idxs
-
 from translators.MLPWithResidual import MLPWithResidual
 from translators.LinearTranslator import LinearTranslator
 from translators.TransformTranslator import TransformTranslator
@@ -78,22 +76,6 @@ def load_n_translator(cfg, encoder_dims):
 
 def get_loaders(dsets, bs, shuffle):
     return [DataLoader(dset, batch_size=bs, shuffle=shuffle, num_workers=1) for dset in dsets]
-
-def get_val_sets(masks, cfg, seed, test_flag=True, keep_in_memory=True):
-    mask = masks[0] if not test_flag else ~masks[0]
-    for m in masks[1:]:
-        mask &= m if not test_flag else ~m
-
-    np.random.seed(seed)
-    idxs = np.random.choice(np.where(mask)[0], cfg.val_size, replace=False)
-    X_val = load_and_process_embeddings_from_idxs(
-        cfg.dataset, cfg.emb1, idxs, cfg.normalize_embeddings, 'train', 32, keep_in_memory, 'cpu'
-    )
-
-    Y_val = load_and_process_embeddings_from_idxs(
-        cfg.dataset, cfg.emb2, idxs, cfg.normalize_embeddings, 'train', 32, keep_in_memory, 'cpu'
-    )
-    return X_val, Y_val
 
 def get_text_sets(dsets, size, seed):
     np.random.seed(seed)
