@@ -2,7 +2,6 @@ import multiprocessing
 import os, json
 from types import SimpleNamespace
 
-import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -73,17 +72,6 @@ def load_n_translator(cfg, encoder_dims):
         norm_style=cfg.norm_style if hasattr(cfg, 'norm_style') else 'batch',
     )
 
-
-def get_loaders(dsets, bs, shuffle):
-    return [DataLoader(dset, batch_size=bs, shuffle=shuffle, num_workers=1) for dset in dsets]
-
-def get_text_sets(dsets, size, seed):
-    np.random.seed(seed)
-    idxs = np.random.choice(len(dsets[0]), size, replace=False)
-    return [d.select(idxs) for d in dsets]
-
-def get_text_loader(size):
-    return DataLoader(TensorDataset(torch.arange(size)), batch_size=64, shuffle=False)
 
 def get_inverters(emb_flags, device='cpu'):
     assert isinstance(emb_flags, list)
