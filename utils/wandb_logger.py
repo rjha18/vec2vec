@@ -48,9 +48,7 @@ class Logger:
         self.vals = TensorRunningAverages()
         self.enabled = (not kws.pop("dummy", False)) and (get_rank() == 0)
         if self.enabled:
-            wandb.init(
-                **kws
-            )
+            wandb.init(**kws)
         else:
             print("Wandb is disabled")
             wandb.init(mode="disabled")

@@ -297,8 +297,7 @@ def main():
         config=cfg,
     )
 
-    num_workers = get_num_proc()
-    
+    num_workers = min(get_num_proc(), 8)
     if cfg.dataset != 'mimic':
         dset = load_streaming_embeddings(cfg.dataset)
         print(f"Using {num_workers} workers and {len(dset)} datapoints")
