@@ -123,8 +123,6 @@ def main():
         # Set up seaborn style and figure
         sns.set_style("white")
         sns.set_context("paper", font_scale=4)
-        plt.figure(figsize=(20, 8))
-
         # Create subplots with more space between them
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
         fig.subplots_adjust(wspace=0.5) 
@@ -148,6 +146,8 @@ def main():
                      [sup_2d[i, 1], unsup_2d[i, 1]],
                      color='gray', alpha=ALPHA, linewidth=WIDTH, zorder=1)
         # Show spines but hide ticks and labels
+        for spine in ax1.spines.values():
+            spine.set_linewidth(2.0)
         ax1.spines['top'].set_visible(True)
         ax1.spines['right'].set_visible(True)
         ax1.spines['bottom'].set_visible(True)
@@ -176,6 +176,8 @@ def main():
                      [sup_rep_2d[i, 1], unsup_rep_2d[i, 1]],
                      color='gray', alpha=ALPHA+0.15, linewidth=WIDTH + 0.25, zorder=1)
         # Show spines but hide ticks and labels
+        for spine in ax2.spines.values():
+            spine.set_linewidth(2.0)
         ax2.spines['top'].set_visible(True)
         ax2.spines['right'].set_visible(True)
         ax2.spines['bottom'].set_visible(True)
@@ -184,6 +186,13 @@ def main():
         ax2.set_yticks([])
         ax2.set_xticklabels([])
         ax2.set_yticklabels([])
+
+        # Add arrow between subplots
+        # plt.annotate('', xy=(0.5, 0.5), xytext=(0.5, 0.5),
+        #             # xycoords='figure fraction', textcoords='figure fraction',
+        #             arrowprops=dict(arrowstyle='->', color='black', lw=3),
+        #             ha='center', va='center',
+        # )
 
         # Save
         plt.tight_layout()
