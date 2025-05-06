@@ -9,6 +9,7 @@ import accelerate
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.manifold import TSNE  # Use TSNE instead of PCA
 
 # from eval import eval_model
@@ -119,32 +120,16 @@ def main():
         print(torch.nn.functional.cosine_similarity(reps[cfg.sup_emb], reps[cfg.unsup_emb]).mean())
         print(torch.nn.functional.cosine_similarity(ins[cfg.sup_emb], ins[cfg.unsup_emb]).mean())
 
-        # --- t-SNE for intermediate representations ---
-        sup_array = reps[cfg.sup_emb].cpu().numpy()
-        unsup_array = reps[cfg.unsup_emb].cpu().numpy()
-        combined = np.concatenate([sup_array, unsup_array], axis=0)
-        tsne = TSNE(n_components=2, random_state=42)
-        combined_2d = tsne.fit_transform(combined)
-        sup_rep_2d = combined_2d[:sup_array.shape[0]]
-        unsup_rep_2d = combined_2d[sup_array.shape[0]:]
+        # Set up seaborn style and figure
+        sns.set_style("white")
+        sns.set_context("paper", font_scale=4)
+        plt.figure(figsize=(20, 8))
 
-        plt.figure(figsize=(10, 8))
-        # Draw light lines between paired points
-        for i in range(sup_rep_2d.shape[0]):
-            plt.plot([sup_rep_2d[i, 0], unsup_rep_2d[i, 0]],
-                     [sup_rep_2d[i, 1], unsup_rep_2d[i, 1]],
-                     color='gray', alpha=ALPHA+0.15, linewidth=WIDTH + 0.25, zorder=1)
-        plt.scatter(sup_rep_2d[:, 0], sup_rep_2d[:, 1], color=C1, label=f'Intermediate ({cfg.sup_emb})', linewidths=LINEWIDTH, edgecolors='black', zorder=2)
-        plt.scatter(unsup_rep_2d[:, 0], unsup_rep_2d[:, 1], color=C2, label=f'Intermediate ({cfg.unsup_emb})', linewidths=LINEWIDTH, edgecolors='black', zorder=2)
-        plt.title(f"t-SNE Plot of Intermediate Representations for {cfg.val_bs} Texts")
-        plt.xlabel("t-SNE Dimension 1")
-        plt.ylabel("t-SNE Dimension 2")
-        plt.legend()
-        plt.savefig('quiver_plot_intermediate.png')
-        plt.clf()
-        print('Saved plot...')
+        # Create subplots with more space between them
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+        fig.subplots_adjust(wspace=0.5) 
 
-        # --- t-SNE for input embeddings ---
+        # First subplot - Input embeddings
         sup_array = ins[cfg.sup_emb].cpu().numpy()
         unsup_array = ins[cfg.unsup_emb].cpu().numpy()
         combined = np.concatenate([sup_array, unsup_array], axis=0)
@@ -153,21 +138,58 @@ def main():
         sup_2d = combined_2d[:sup_array.shape[0]]
         unsup_2d = combined_2d[sup_array.shape[0]:]
 
-        plt.figure(figsize=(10, 8))
+        ax1.scatter(sup_2d[:, 0], sup_2d[:, 1], color=C1, label=f'{cfg.sup_emb}', 
+                   s=100, edgecolors='black', linewidth=1.0, zorder=2)
+        ax1.scatter(unsup_2d[:, 0], unsup_2d[:, 1], color=C2, label=f'{cfg.unsup_emb}', 
+                   s=100, edgecolors='black', linewidth=1.0, zorder=2)
         # Draw light lines between paired points
         for i in range(sup_2d.shape[0]):
-            plt.plot([sup_2d[i, 0], unsup_2d[i, 0]],
+            ax1.plot([sup_2d[i, 0], unsup_2d[i, 0]],
                      [sup_2d[i, 1], unsup_2d[i, 1]],
                      color='gray', alpha=ALPHA, linewidth=WIDTH, zorder=1)
-        plt.scatter(sup_2d[:, 0], sup_2d[:, 1], color=C1, label=f'{cfg.sup_emb}', edgecolors='black', linewidths=LINEWIDTH, zorder=2)
-        plt.scatter(unsup_2d[:, 0], unsup_2d[:, 1], color=C2, label=f'{cfg.unsup_emb}', edgecolors='black', linewidths=LINEWIDTH, zorder=2)
-        plt.title(f"t-SNE Plot of Text Embeddings for {cfg.val_bs} Texts")
-        plt.xlabel("t-SNE Dimension 1")
-        plt.ylabel("t-SNE Dimension 2")
-        plt.legend()
-        plt.savefig('quiver_plot_embs.png')
+        # Show spines but hide ticks and labels
+        ax1.spines['top'].set_visible(True)
+        ax1.spines['right'].set_visible(True)
+        ax1.spines['bottom'].set_visible(True)
+        ax1.spines['left'].set_visible(True)
+        ax1.set_xticks([])
+        ax1.set_yticks([])
+        ax1.set_xticklabels([])
+        ax1.set_yticklabels([])
+
+        # Second subplot - Intermediate representations
+        sup_array = reps[cfg.sup_emb].cpu().numpy()
+        unsup_array = reps[cfg.unsup_emb].cpu().numpy()
+        combined = np.concatenate([sup_array, unsup_array], axis=0)
+        tsne = TSNE(n_components=2, random_state=42)
+        combined_2d = tsne.fit_transform(combined)
+        sup_rep_2d = combined_2d[:sup_array.shape[0]]
+        unsup_rep_2d = combined_2d[sup_array.shape[0]:]
+
+        ax2.scatter(sup_rep_2d[:, 0], sup_rep_2d[:, 1], color=C1, label=cfg.sup_emb, 
+                   s=100, edgecolors='black', linewidth=1.0, zorder=2)
+        ax2.scatter(unsup_rep_2d[:, 0], unsup_rep_2d[:, 1], color=C2, label=cfg.unsup_emb, 
+                   s=100, edgecolors='black', linewidth=1.0, zorder=2)
+        # Draw light lines between paired points
+        for i in range(sup_rep_2d.shape[0]):
+            ax2.plot([sup_rep_2d[i, 0], unsup_rep_2d[i, 0]],
+                     [sup_rep_2d[i, 1], unsup_rep_2d[i, 1]],
+                     color='gray', alpha=ALPHA+0.15, linewidth=WIDTH + 0.25, zorder=1)
+        # Show spines but hide ticks and labels
+        ax2.spines['top'].set_visible(True)
+        ax2.spines['right'].set_visible(True)
+        ax2.spines['bottom'].set_visible(True)
+        ax2.spines['left'].set_visible(True)
+        ax2.set_xticks([])
+        ax2.set_yticks([])
+        ax2.set_xticklabels([])
+        ax2.set_yticklabels([])
+
+        # Save
+        plt.tight_layout()
+        plt.savefig('universal.png', dpi=300, bbox_inches='tight')
         plt.clf()
-        print('Saved plot...')
+        print('Saved plot to universal.png')
 
 
 if __name__ == "__main__":

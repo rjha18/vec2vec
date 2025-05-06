@@ -1,5 +1,7 @@
-from sentence_transformers import SentenceTransformer
+from typing import Optional
+
 import torch
+from sentence_transformers import SentenceTransformer, models
 
 
 MODEL_PATH = '/private/home/jxm/supervised_translation/model_weights/'
@@ -26,11 +28,8 @@ HF_FLAGS = {
 }
 
 
-def load_encoder(model_flag, device: str = 'cpu', mixed_precision: str = None):
-    if model_flag in HF_FLAGS:
-        f = HF_FLAGS[model_flag]
-    else:
-        f = model_flag
+def load_encoder(model_flag, device: str = 'cpu', mixed_precision: Optional[str] = None):
+    f = HF_FLAGS.get(model_flag, model_flag)
 
     model_kwargs = {}
     if mixed_precision is not None:
@@ -45,7 +44,20 @@ def load_encoder(model_flag, device: str = 'cpu', mixed_precision: str = None):
     else:
         model_kwargs['torch_dtype'] = torch.float32
     
-    encoder = SentenceTransformer(f, device=device, trust_remote_code=True, model_kwargs=model_kwargs)
+
+    # special loading for gpt-2
+    if model_flag.startswith("gpt2"):
+        transformer = models.Transformer("sentence-transformers/all-MiniLM-L6-v2", max_seq_length=256)
+        normalize = models.Normalize()
+        if model_flag == "gpt2_mean":
+            pooling = models.Pooling(transformer.get_word_embedding_dimension(), pooling_mode="mean")
+        elif model_flag == "gpt2_last":
+            pooling = models.Pooling(transformer.get_word_embedding_dimension(), pooling_mode="mean")
+        else:
+            raise ValueError(f"Unknown gpt-2 model {model_flag}")
+        encoder = SentenceTransformer(modules=[transformer, pooling, normalize])
+    else:
+        encoder = SentenceTransformer(f, device=device, trust_remote_code=True, model_kwargs=model_kwargs)
     return encoder.eval()
 
 
