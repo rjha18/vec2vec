@@ -21,3 +21,5 @@ finetuning_unsupervised*
 final_models/
 old*
 data/
+viz/
+latex/
