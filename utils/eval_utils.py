@@ -106,7 +106,9 @@ def eval_batch(ins, recons, translations):
             "mse": F.mse_loss(emb, rec).item(),
             "cos": F.cosine_similarity(emb, rec).mean().item(),
             "std": rec.std(dim=0).mean().item(),
-            "vsp": (in_distances - rec_distances).abs().mean().item()
+            "vsp": (in_distances - rec_distances).abs().mean().item(),
+            "cos_var": F.cosine_similarity(emb, rec).var().item(),
+            "vsp_var": (in_distances - rec_distances).abs().var().item()
         }
         translation_res[target_flag] = {}
         for flag, trans in translations[target_flag].items():
@@ -116,7 +118,9 @@ def eval_batch(ins, recons, translations):
                 "mse": F.mse_loss(emb, trans).item(),
                 "cos": F.cosine_similarity(emb, trans).mean().item(),
                 "std": trans.std(dim=0).mean().item(),
-                "vsp": (in_distances - out_distances).abs().mean().item()
+                "vsp": (in_distances - out_distances).abs().mean().item(),
+                "cos_var": F.cosine_similarity(emb, trans).var().item(),
+                "vsp_var": (in_distances - out_distances).abs().var().item()
             }
     return recon_res, translation_res
 
@@ -169,17 +173,29 @@ def merge_dicts(full, incremental):
     recursive_merge(full, incremental)
 
 
-def mean_dicts(full):
-    def recursive_mean(f):
-        for key, val in f.items():
+def mean_dicts(full, ses=False, bs=1):
+    """
+    Recursively replace every leaf-list in `full` by its mean.
+    If include_std=True, also add a sibling leaf with suffix '_std'.
+    """
+    def _recurse(d):
+        for key in list(d.keys()):
+            val = d[key]
             if isinstance(val, dict):
-                recursive_mean(val)
-            elif isinstance(val, list) and len(val) > 1:
-                f[key] = np.mean(val)
+                _recurse(val)
+            elif isinstance(val, list):
+                if len(val) > 1:
+                    d[key] = np.mean(val)
+                else:
+                    d[key] = val[0]
+                if ses and 'var' in key:
+                    d[f"{key.replace('var', 'se')}"] = np.sqrt(d[key]) / np.sqrt(len(val) * bs)
             else:
-                f[key] = val[0]
+                d[key] = val
+
+    _recurse(full)
+    return full
     
-    recursive_mean(full)
 
 
 def top_k_accuracy(sims, k=1):
@@ -190,7 +206,8 @@ def top_k_accuracy(sims, k=1):
 
 def get_avg_rank(sims: np.ndarray) -> float:
     ranks = (np.argsort(-sims) == np.arange(sims.shape[0])[:, None])
-    return ranks.argmax(1).mean() + 1
+    amax = ranks.argmax(1)
+    return amax.mean() + 1, amax.var()
 
 
 def create_heatmap(translator, ins, tgt_emb, src_emb, top_k_size, heatmap_size=None, k=16) -> dict:
@@ -203,7 +220,10 @@ def create_heatmap(translator, ins, tgt_emb, src_emb, top_k_size, heatmap_size=N
     sims = (ins_norm @ trans_norm.T).numpy()
     res[f'{src_emb}_{tgt_emb}_top_1_acc'] = (sims.argmax(axis=1) == np.arange(sims.shape[0])).mean()
     res[f'{src_emb}_{tgt_emb}_top_{k}_acc'] = top_k_accuracy(sims, k)
-    res[f"{src_emb}_{tgt_emb}_top_rank"] = get_avg_rank(sims)
+    avg_rank, rank_var = get_avg_rank(sims)
+    res[f"{src_emb}_{tgt_emb}_rank"] = avg_rank
+    res[f"{src_emb}_{tgt_emb}_rank_var"] = rank_var
+    
     if heatmap_size is not None:
         sims = sims[:heatmap_size, :heatmap_size]
         sims_softmax = F.softmax(torch.tensor(sims) * 100, dim=1).numpy()
@@ -343,17 +363,17 @@ def eval_loop_(
                 merge_dicts(text_recon_res, t_r_res)
                 merge_dicts(text_translation_res, t_t_res)
             if labels is not None:
-                c_res = classification_batch(ins, translations, labels, batch['label'], k=3)
+                c_res = classification_batch(ins, translations, labels, batch['label'], k=cfg.k)
                 merge_dicts(classification_res, c_res)
             if pbar is not None:
                 pbar.update(1)
 
-        mean_dicts(recon_res)
-        mean_dicts(translation_res)
-        mean_dicts(heatmap_res)
-        mean_dicts(text_recon_res)
-        mean_dicts(text_translation_res)
-        mean_dicts(classification_res)
+        recon_res = mean_dicts(recon_res, ses=True, bs=cfg.val_bs)
+        translation_res = mean_dicts(translation_res, ses=True, bs=cfg.val_bs)
+        heatmap_res = mean_dicts(heatmap_res, ses=True, bs=cfg.val_bs)
+        text_recon_res = mean_dicts(text_recon_res)
+        text_translation_res = mean_dicts(text_translation_res)
+        classification_res = mean_dicts(classification_res, ses=True, bs=cfg.val_bs)
         return recon_res, translation_res, heatmap_res, text_recon_res, text_translation_res, classification_res
 
 

@@ -73,16 +73,15 @@ def main():
     dset = dset.shuffle(seed=cfg.train_dataset_seed)
     if hasattr(cfg, 'num_points'):
         assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
-        # supset = dset.select(range(cfg.num_points))
+        supset = dset.select(range(cfg.num_points))
         unsupset = dset.select(range(cfg.num_points, cfg.num_points + cfg.val_size))
     elif hasattr(cfg, 'unsup_points'):
-        unsupset = dset.select(range(min(cfg.unsup_points, len(cfg.val_size))))
-        # supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
-
+        unsupset = dset.select(range(min(cfg.unsup_points, cfg.val_size)))
+        supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
 
     num_workers = get_num_proc()
     evalset = MultiencoderTokenizedDataset(
-        dataset=valset if hasattr(cfg, 'use_ood') and cfg.use_ood else unsupset,
+        dataset=supset if hasattr(cfg, 'flip') and cfg.flip else unsupset,
         encoders={ **unsup_enc, **sup_encs },
         n_embs_per_batch=2,
         batch_size=cfg.val_bs,
@@ -107,7 +106,8 @@ def main():
         translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
 
     translator = accelerator.prepare(translator)
-    inverters = get_inverters(["gtr"], accelerator.device)
+    # inverters = get_inverters(["gtr"], accelerator.device)
+    inverters = None
 
     with torch.no_grad():
         translator.eval()
@@ -160,8 +160,8 @@ def main():
 
     if cfg.style == 'identity':
         fnm = f'results/baseline_{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
-    elif hasattr(cfg, 'use_ood') and cfg.use_ood:
-        fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}_ood.json'
+    elif hasattr(cfg, 'flip') and cfg.flip:
+        fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.sup_emb}_{cfg.unsup_emb}_ood.json'
     else:
         fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
     with open(fnm, 'w') as f:

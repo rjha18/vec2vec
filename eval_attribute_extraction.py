@@ -149,7 +149,8 @@ def main():
         translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
 
     translator = accelerator.prepare(translator)
-    inverters = get_inverters(["gtr"], accelerator.device)
+    inverters = None
+    # get_inverters(["gtr"], accelerator.device)
 
     with torch.no_grad():
         translator.eval()
