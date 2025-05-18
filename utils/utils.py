@@ -2,15 +2,13 @@ import multiprocessing
 import os, json
 from types import SimpleNamespace
 
-import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from huggingface_hub.file_download import hf_hub_download
 from safetensors.torch import load_file
 
-from utils.embeddings import load_and_process_embeddings_from_idxs
-
+from translators.IdentityBaseline import IdentityBaseline
 from translators.MLPWithResidual import MLPWithResidual
 from translators.LinearTranslator import LinearTranslator
 from translators.TransformTranslator import TransformTranslator
@@ -21,6 +19,8 @@ from vec2text.models import InversionModel
 
 
 def load_n_translator(cfg, encoder_dims):
+    if cfg.style == 'identity':
+        return IdentityBaseline(encoder_dims)
     if cfg.style == 'linear':
         return LinearTranslator(
             encoder_dims,
@@ -72,33 +72,6 @@ def load_n_translator(cfg, encoder_dims):
         norm_style=cfg.norm_style if hasattr(cfg, 'norm_style') else 'batch',
     )
 
-
-def get_loaders(dsets, bs, shuffle):
-    return [DataLoader(dset, batch_size=bs, shuffle=shuffle, num_workers=1) for dset in dsets]
-
-def get_val_sets(masks, cfg, seed, test_flag=True, keep_in_memory=True):
-    mask = masks[0] if not test_flag else ~masks[0]
-    for m in masks[1:]:
-        mask &= m if not test_flag else ~m
-
-    np.random.seed(seed)
-    idxs = np.random.choice(np.where(mask)[0], cfg.val_size, replace=False)
-    X_val = load_and_process_embeddings_from_idxs(
-        cfg.dataset, cfg.emb1, idxs, cfg.normalize_embeddings, 'train', 32, keep_in_memory, 'cpu'
-    )
-
-    Y_val = load_and_process_embeddings_from_idxs(
-        cfg.dataset, cfg.emb2, idxs, cfg.normalize_embeddings, 'train', 32, keep_in_memory, 'cpu'
-    )
-    return X_val, Y_val
-
-def get_text_sets(dsets, size, seed):
-    np.random.seed(seed)
-    idxs = np.random.choice(len(dsets[0]), size, replace=False)
-    return [d.select(idxs) for d in dsets]
-
-def get_text_loader(size):
-    return DataLoader(TensorDataset(torch.arange(size)), batch_size=64, shuffle=False)
 
 def get_inverters(emb_flags, device='cpu'):
     assert isinstance(emb_flags, list)
@@ -177,3 +150,13 @@ def exit_on_nan(loss: torch.Tensor) -> None:
     if torch.isnan(loss).any():
         print("Loss is NaN! exiting")
         exit(1)
+
+
+def save_everything(cfg, translator, opt, gans, save_dir):
+    torch.save(translator.state_dict(), os.path.join(save_dir, 'model.pt'))
+    torch.save(opt.state_dict(), os.path.join(save_dir, 'opt.pt'))
+    for i, gan in enumerate(gans):
+        torch.save(gan.discriminator.state_dict(), os.path.join(save_dir, f'gan_{i}.pt'))
+        torch.save(gan.discriminator_opt.state_dict(), os.path.join(save_dir, f'gan_opt_{i}.pt'))
+    with open(os.path.join(save_dir, 'config.json'), 'w') as f:
+        json.dump(cfg.__dict__, f)

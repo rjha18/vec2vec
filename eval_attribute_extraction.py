@@ -7,15 +7,18 @@ from types import SimpleNamespace
 import accelerate
 
 import numpy as np
+import pandas as pd
 import torch
 
 # from eval import eval_model
-from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
+from utils.collate import MultiEncoderClassificationDataset, TokenizedCollator
 from utils.dist import get_rank
-from utils.eval_utils import eval_loop_
+from utils.eval_utils import eval_loop_, text_to_embedding
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings
+
+from datasets import load_dataset, load_from_disk
 
 
 def main():
@@ -40,9 +43,7 @@ def main():
     # https://github.com/huggingface/transformers/issues/26548
     accelerator.dataloader_config.dispatch_batches = False
 
-    dset = load_streaming_embeddings(cfg.dataset)
-
-    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)}
+    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' else None)}
     encoder_dims = {cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])}
     translator = load_n_translator(cfg, encoder_dims)
 
@@ -50,7 +51,7 @@ def main():
     assert cfg.sup_emb != cfg.unsup_emb
 
     unsup_enc = {
-        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
+        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' else None)
     }
     unsup_dim = {
         cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
@@ -65,31 +66,73 @@ def main():
         cfg.num_params = sum(x.numel() for x in translator.parameters())
         print("Number of parameters:", cfg.num_params)
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
-    dset = dset_dict["train"]
-    valset = dset_dict["test"]
+    if hasattr(cfg, 'val_dataset') and cfg.val_dataset == 'tweets':
+        ### Tweets
+        dset_name = 'cardiffnlp/tweet_topic_multilingual'
+        dset = load_dataset('cardiffnlp/tweet_topic_multilingual', 'en', num_proc=8)['test']
+        raw_labels = pd.read_csv('labels/tweet_topic_multilingual.csv')['label'].tolist()
+    elif hasattr(cfg, 'val_dataset') and cfg.val_dataset == 'enron':
+        ### ENRON
+        dset_name = 'rishi-jha/filtered_enron'
+        dset = load_dataset('rishi-jha/filtered_enron', split='train', num_proc=8).shuffle(seed=cfg.val_dataset_seed).select(range(1280))
+        raw_labels = list(json.load(open('email_to_index.json', 'r')).keys())
+        # read from email_structure.txt
+        email_structure = open('email_structure.txt', 'r').read()
+        print(email_structure)
+        raw_labels = [email_structure.format(l, l) for l in raw_labels]
+    elif hasattr(cfg, 'val_dataset') and 'mimic' in cfg.val_dataset:
+        ### MIMIC
+        if cfg.val_dataset == 'mimic':
+            dset_name = 'data/mimic'
+        elif cfg.val_dataset == 'mimic_templates':
+            dset_name = 'data/mimic_templates'
+        split = "medcat"
+        dset = load_from_disk(dset_name)['unsupervised'].shuffle(seed=cfg.val_dataset_seed)
+        dset = dset.select(range(cfg.val_size))
+        raw_labels = pd.read_csv(f"data/mimic/{split}_mapping.csv").sort_values("index")[split + '_description' if split == 'medcat' else ''].to_list()
+        num_classes = len(raw_labels)
 
-    assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
-    dset = dset.shuffle(seed=cfg.train_dataset_seed)
-    if hasattr(cfg, 'num_points'):
-        assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
-        supset = dset.select(range(cfg.num_points))
-        unsupset = dset.select(range(cfg.num_points, cfg.num_points + cfg.val_size))
-    elif hasattr(cfg, 'unsup_points'):
-        unsupset = dset.select(range(min(cfg.unsup_points, cfg.val_size)))
-        supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+        def add_one_hot_label(example):
+            index = example[f"{split}" + "_indices" if split == 'medcat' else "_index"]
+            one_hot = [0] * num_classes
 
+            if isinstance(index, list):
+                for i in index:
+                    one_hot[i] = 1
+            elif isinstance(index, int):
+                one_hot[index] = 1
+            else:
+                raise ValueError(f"Unknown index type {type(index)}")
+
+            example["label"] = one_hot
+            return example
+
+        dset = dset.map(add_one_hot_label)
+        keep_columns = ["text", "label"]
+        dset = dset.remove_columns([col for col in dset.column_names if col not in keep_columns])
+    else:
+        raise ValueError(f"Unknown dataset {cfg.val_dataset}")
+
+
+    # Labels for attribute extraction
+    labels = {
+        cfg.sup_emb: text_to_embedding(raw_labels, cfg.sup_emb, sup_encs[cfg.sup_emb], cfg.normalize_embeddings, cfg.max_seq_length, accelerator.device),
+        cfg.unsup_emb: text_to_embedding(raw_labels, cfg.unsup_emb, unsup_enc[cfg.unsup_emb], cfg.normalize_embeddings, cfg.max_seq_length, accelerator.device)
+    }
+    print('Loaded labels...')
     num_workers = get_num_proc()
-    evalset = MultiencoderTokenizedDataset(
-        dataset=supset if hasattr(cfg, 'flip') and cfg.flip else unsupset,
+
+    dset = MultiEncoderClassificationDataset(
+        dataset=dset,
         encoders={ **unsup_enc, **sup_encs },
         n_embs_per_batch=2,
         batch_size=cfg.val_bs,
         max_length=cfg.max_seq_length,
         seed=cfg.sampling_seed,
     )
-    evalloader = DataLoader(
-        evalset,
+
+    valloader = DataLoader(
+        dset,
         batch_size=cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
         num_workers=num_workers,
         shuffle=False,
@@ -98,7 +141,7 @@ def main():
         collate_fn=TokenizedCollator(),
         drop_last=True,
     )
-    evalloader = accelerator.prepare(evalloader)
+    valloader = accelerator.prepare(valloader)
 
     if cfg.style != 'identity':
         assert hasattr(cfg, 'load_dir')
@@ -106,20 +149,21 @@ def main():
         translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
 
     translator = accelerator.prepare(translator)
-    # inverters = get_inverters(["gtr"], accelerator.device)
     inverters = None
+    # get_inverters(["gtr"], accelerator.device)
 
     with torch.no_grad():
         translator.eval()
         val_res = {}
-        recons, trans, heatmap_dict, text_recons, text_trans, _ =\
+        recons, trans, heatmap_dict, text_recons, text_trans, classification =\
             eval_loop_(
                 cfg,
                 translator,
                 {**sup_encs, **unsup_enc},
-                evalloader,
+                valloader,
                 inverters=inverters,
-                device=accelerator.device
+                device=accelerator.device,
+                labels=labels
             )
         val_res['recons'] = {}
         for flag, res in recons.items():
@@ -138,11 +182,13 @@ def main():
         val_res['heatmap'] = {}
         if len(heatmap_dict) > 0:
             for k,v in heatmap_dict.items():
+                # if v is a plt.Figure, skip it
                 if v.__class__.__name__ == 'Figure':
+                    # val_res['heatmap'][f"{k}"] = v
                     continue
                 else:
                     val_res['heatmap'][f"{k} (avg. {cfg.top_k_batches} batches)"] = v
-        
+
         val_res['text_recons'] = {}
         if len(text_recons) > 0:
             for flag, res in text_recons.items():
@@ -157,17 +203,25 @@ def main():
                         if flag == cfg.unsup_emb and target_flag == cfg.unsup_emb:
                             continue
                         val_res['text_trans'][f"{flag}_{target_flag}_{k}"] = v
+        
+        val_res['classification'] = {}
+        if len(classification) > 0:
+            for k,v in classification.items():
+                val_res['classification'][f"{k}"] = v
 
+
+    # write dictionary to file in results including dataset name, embedding names
     if cfg.style == 'identity':
-        fnm = f'results/baseline_{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
-    elif hasattr(cfg, 'flip') and cfg.flip:
-        fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.sup_emb}_{cfg.unsup_emb}_ood.json'
+        fnm = f'results/baseline_{dset_name.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
     else:
-        fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
+        fnm = f'results/{dset_name.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
     with open(fnm, 'w') as f:
         # human readable
         f.write(json.dumps(val_res, indent=4))
+    # save results to file
+
 
 
 if __name__ == "__main__":
     main()
+

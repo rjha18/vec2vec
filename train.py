@@ -16,8 +16,7 @@ from translators.Discriminator import Discriminator
 
 # from eval import eval_model
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
-from utils.dist import get_rank, get_world_size
-from utils.eval_utils import eval_loop_
+from utils.eval_utils import EarlyStopper, eval_loop_
 from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
@@ -25,6 +24,7 @@ from utils.streaming_utils import load_streaming_embeddings, process_batch
 from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
 from utils.wandb_logger import Logger
 
+from datasets import load_from_disk
 
 def training_loop_(
     save_dir, accelerator, gan, sup_gan, latent_gan, similarity_gan, translator, sup_dataloader, sup_iter, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
@@ -33,19 +33,15 @@ def training_loop_(
     if logger is None:
         logger = Logger(dummy=True)
 
-    if get_rank() == 0:
-        try:
-            wandb.watch(translator, log='all')
-        except:
-            pass
-    
+    # wandb.watch(translator, log='all')
+
     if sup_iter is not None:
         dataloader_pbar = unsup_dataloader
     else:
         dataloader_pbar = zip(sup_dataloader, unsup_dataloader)
 
-    if get_rank() == 0:
-        dataloader_pbar = tqdm(dataloader_pbar, total=len(unsup_dataloader), desc="Training")
+
+    dataloader_pbar = tqdm(dataloader_pbar, total=len(unsup_dataloader), desc="Training")
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
 
@@ -211,8 +207,7 @@ def training_loop_(
             for metric, value in metrics.items():
                 logger.logkv(metric, value)
             logger.dumpkvs(force=(hasattr(cfg, 'force_dump') and cfg.force_dump))
-            if get_rank() == 0:
-                dataloader_pbar.set_postfix(metrics)
+            dataloader_pbar.set_postfix(metrics)
 
     with open(save_dir + 'config.toml', 'w') as f:
         toml.dump(cfg.__dict__, f)
@@ -226,21 +221,21 @@ def main():
     unknown_cfg = read_args(argv)
     cfg = SimpleNamespace(**{**{k: v for d in cfg.values() for k, v in d.items()}, **unknown_cfg})
 
-    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
+    if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' and cfg.mixed_precision == 'bf16' and not torch.cuda.is_bf16_supported():
         cfg.mixed_precision = 'fp16'
         cfg.gradient_accumulation_steps = 1
         print("Note: bf16 is not available on this hardware! Reverting to fp16 and setting accumulation steps to 1.")
 
     # set seeds
-    random.seed(cfg.seed + get_rank())
-    torch.manual_seed(cfg.seed + get_rank())
-    np.random.seed(cfg.seed + get_rank())
-    torch.cuda.manual_seed(cfg.seed + get_rank())
+    random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    torch.cuda.manual_seed(cfg.seed)
 
     use_val_set = hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
-        mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None,
+        mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' else None,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps
     )
     # https://github.com/huggingface/transformers/issues/26548
@@ -261,7 +256,6 @@ def main():
 
     print("Running Experiment:", cfg.wandb_name)
 
-    dset = load_streaming_embeddings(cfg.dataset)
 
     sup_encs = {
         cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
@@ -294,7 +288,6 @@ def main():
     cfg.num_params = sum(x.numel() for x in translator.parameters())
     print("Number of parameters:", cfg.num_params)
     print("Number of *trainable* parameters:", sum(p.numel() for p in translator.parameters() if p.requires_grad))
-    print("Number of training datapoints:", len(dset))
     print(translator)
 
     logger = Logger(
@@ -304,27 +297,34 @@ def main():
         config=cfg,
     )
 
-    num_workers = get_num_proc()
-    print(f"Rank {get_rank()} using {num_workers} workers and {len(dset)} datapoints")
-    if get_world_size() > 1:
-        max_num_datapoints = len(dset) - (len(dset) % (cfg.bs * get_world_size()))
-        dset = dset.select(range(max_num_datapoints))
-        print(f"[Filtered] Rank {get_rank()} now using {len(dset)} datapoints")
+    num_workers = min(get_num_proc(), 8)
+    if cfg.dataset != 'mimic':
+        dset = load_streaming_embeddings(cfg.dataset)
+        print(f"Using {num_workers} workers and {len(dset)} datapoints")
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
-    dset = dset_dict["train"]
-    valset = dset_dict["test"]
+        dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
+        dset = dset_dict["train"]
+        valset = dset_dict["test"]
 
-    assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
-    dset = dset.shuffle(seed=cfg.train_dataset_seed)
-    if hasattr(cfg, 'num_points'):
-        assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
-        supset = dset.select(range(cfg.num_points))
-        unsupset = dset.select(range(cfg.num_points, cfg.num_points * 2))
-    elif hasattr(cfg, 'unsup_points'):
-        unsupset = dset.select(range(min(cfg.unsup_points, len(dset))))
-        supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+        assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
+        dset = dset.shuffle(seed=cfg.train_dataset_seed)
+        if hasattr(cfg, 'num_points'):
+            assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
+            supset = dset.select(range(cfg.num_points))
+            unsupset = dset.select(range(cfg.num_points, cfg.num_points * 2))
+        elif hasattr(cfg, 'unsup_points'):
+            unsupset = dset.select(range(min(cfg.unsup_points, len(dset))))
+            supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+    else:
+        supset = load_from_disk('data/mimic')['supervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
+        unsupset = load_from_disk('data/mimic')['unsupervised'].shuffle(cfg.train_dataset_seed).select(range(cfg.num_points))
+        valset = load_from_disk('data/mimic')['evaluation'].shuffle(cfg.val_dataset_seed).select(range(cfg.val_size))
 
+        # for each, drop all columns but 'text' using remove_columns
+        supset = supset.remove_columns([col for col in supset.column_names if col != 'text'])
+        unsupset = unsupset.remove_columns([col for col in unsupset.column_names if col != 'text'])
+        valset = valset.remove_columns([col for col in valset.column_names if col != 'text'])
+        
 
     supset = MultiencoderTokenizedDataset(
         dataset=supset,
@@ -438,7 +438,7 @@ def main():
     max_num_epochs = int(np.ceil(cfg.epochs))
     steps_per_epoch = len(supset) // cfg.bs
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
-    warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100) * get_world_size()
+    warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100)
 
     def lr_lambda(step):
         if step < warmup_length:
@@ -469,8 +469,6 @@ def main():
     )
     sup_dataloader, unsup_dataloader = accelerator.prepare(sup_dataloader, unsup_dataloader)
 
-    best_model = None
-    best_disc = None
 
     if cfg.gan_style == "vanilla":
         gan_cls = VanillaGAN
@@ -517,12 +515,18 @@ def main():
     if hasattr(cfg, 'unsup_points'):
         sup_iter = iter(sup_dataloader)
 
+    if hasattr(cfg, 'val_size') and hasattr(cfg, 'patience') and hasattr(cfg, 'min_delta'):
+        early_stopper = EarlyStopper(patience=cfg.patience, min_delta=cfg.min_delta, increase=False)
+        early_stopping = True
+    else:
+        early_stopping = False
+
     for epoch in range(max_num_epochs):
-        if use_val_set and get_rank() == 0:
+        if use_val_set:
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
-                recons, trans, heatmap_dict, _, _ = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
+                recons, trans, heatmap_dict, _, _, _ = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
                 for flag, res in recons.items():
                     for k, v in res.items():
                         if k == 'cos':
@@ -544,10 +548,20 @@ def main():
                 wandb.log(val_res)
                 translator.train()
 
+            if epoch >= cfg.min_epochs and early_stopping:
+                score = np.mean([v for k, v in val_res.items() if 'top_rank' in k])
+
+                if early_stopper.early_stop(score):
+                    print("Early stopping...")
+                    break
+                if early_stopper.counter == 0 and score < early_stopper.opt_val:
+                    print(f"Saving model (counter = {early_stopper.counter})... {score} < {early_stopper.opt_val} is the best score so far...")
+                    save_everything(cfg, translator, opt, [gan, sup_gan, latent_gan, similarity_gan], save_dir)
+
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:
-            max_num_batches = max(1, (cfg.epochs - epoch) * len(supset) // cfg.bs // get_world_size())
+            max_num_batches = max(1, (cfg.epochs - epoch) * len(supset) // cfg.bs)
             print(f"Setting max_num_batches to {max_num_batches}")
 
         sup_iter = training_loop_(
@@ -572,11 +586,6 @@ def main():
 
     with open(save_dir + 'config.toml', 'w') as f:
         toml.dump(cfg.__dict__, f)
-    # save model
-    best_model = best_model if best_model is not None else accelerator.unwrap_model(translator).state_dict()
-    best_disc = best_disc if best_disc is not None else disc.state_dict()
-    torch.save(best_model, model_save_dir)
-    torch.save(best_disc, disc_save_dir)
 
 
 if __name__ == "__main__":
