@@ -41,4 +41,22 @@ The `train.py` script with the `unsupervised` option accepts various parameters,
 - `--noise_level`: Level of noise to add
 
 #### Translator Architecture
-- `--translator.
+- `--translator`
+
+
+## The Paper
+our paper is available on ArXiv: [Harnessing the Universal Geometry of Embeddings](https://arxiv.org/abs/2505.12540) (Jha, Zhang, Shmatikov, and Morris, 2025)
+
+please cite it!
+
+```
+@misc{jha2025harnessinguniversalgeometryembeddings,
+      title={Harnessing the Universal Geometry of Embeddings}, 
+      author={Rishi Jha and Collin Zhang and Vitaly Shmatikov and John X. Morris},
+      year={2025},
+      eprint={2505.12540},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2505.12540}, 
+}
+```
