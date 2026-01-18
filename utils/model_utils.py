@@ -25,7 +25,7 @@ HF_FLAGS = {
     'modernbert': 'answerdotai/ModernBERT-base',
     'modernbert-large': 'answerdotai/ModernBERT-large',
     'nomicbert': 'nomic-ai/nomic-bert-2048',
-    'qwen': 'Qwen/Qwen3-Embedding-0.6B',
+    'qwen': 'Qwen/Qwen3-Embedding-4B',
 }
 
 

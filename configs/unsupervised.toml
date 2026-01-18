@@ -11,7 +11,7 @@ max_seq_length = 64
 unsup_emb = 'stella'
 sup_emb = 'gte'
 n_embs_per_batch = 1
-finetune_mode = false
+finetune_mode = true
 noise_level = 0.0
 
 [translator]
@@ -45,9 +45,9 @@ loss_coefficient_cc_rec = 0.0
 loss_coefficient_cc_vsp = 10.0
 loss_coefficient_r1_penalty = 0.0
 warmup_length = 2000
-patience = 20
+patience = 50
 min_delta = 0.0
-min_epochs = 80
+min_epochs = 250
 
 
 [gan]
@@ -71,6 +71,6 @@ heatmap_size = 64
 use_wandb = true
 wandb_project = 'unsupervised_disc'
 wandb_name = 'unsupervised'
-load_dir = './finetuning_unsupervised/n:100000,e:10,s:n_double,d:4,d:4,d:64/'
-save_dir = './finetuning_unsupervised/{}/'
+load_dir = '/home/rdj58_cornell_edu/vec2vec/finetuning_unsupervised/m:bf16,n:100000,e:1000,u:gte,s:qwen,s:102,l:5.0,l:5.0,t:4,d:4,l:5e-05,d:2e-05/'
+save_dir = '/home/rdj58_cornell_edu/vec2vec/finetuning_unsupervised/{}/'
 force_dump = true

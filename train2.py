@@ -242,10 +242,12 @@ def main():
     accelerator.dataloader_config.dispatch_batches = False
 
     if hasattr(cfg, 'force_wandb_name') and cfg.force_wandb_name:
-        save_dir = cfg.save_dir.format(cfg.wandb_name)
+        base_save_dir = cfg.save_dir.format(cfg.wandb_name)
     else:
         cfg.wandb_name = ','.join([f"{k[0]}:{v}" for k, v in unknown_cfg.items()]) if unknown_cfg else cfg.wandb_name
-        save_dir = cfg.save_dir.format(cfg.latent_dims if hasattr(cfg, 'latent_dims') else cfg.wandb_name)
+        base_save_dir = cfg.save_dir.format(cfg.latent_dims if hasattr(cfg, 'latent_dims') else cfg.wandb_name)
+    base_save_dir = base_save_dir.rstrip("/\\")
+    save_dir = f"{base_save_dir}_phase2/"
 
     logger = Logger(
         project=cfg.wandb_project,
@@ -438,15 +440,11 @@ def main():
     max_num_epochs = int(np.ceil(cfg.epochs))
     steps_per_epoch = len(supset) // cfg.bs
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
-    warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100)
 
     def lr_lambda(step):
-        if step < warmup_length:
-            return min(1, step / warmup_length)
-        else:
-            if hasattr(cfg, 'no_scheduler') and cfg.no_scheduler:
-                return 1
-            return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
+        if hasattr(cfg, 'no_scheduler') and cfg.no_scheduler:
+            return 1
+        return max(0.0, 1 - (step / max(1, total_steps)))
 
     scheduler = LambdaLR(opt, lr_lambda=lr_lambda)
     disc_scheduler = LambdaLR(disc_opt, lr_lambda=lr_lambda)
@@ -457,8 +455,33 @@ def main():
     if cfg.finetune_mode:
         assert hasattr(cfg, 'load_dir')
         print(f"Loading models from {cfg.load_dir}...")
-        translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
-        disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
+        model_path = os.path.join(cfg.load_dir, 'model.pt')
+        opt_path = os.path.join(cfg.load_dir, 'opt.pt')
+        gan_paths = [
+            (os.path.join(cfg.load_dir, 'gan_0.pt'), os.path.join(cfg.load_dir, 'gan_opt_0.pt')),
+            (os.path.join(cfg.load_dir, 'gan_1.pt'), os.path.join(cfg.load_dir, 'gan_opt_1.pt')),
+            (os.path.join(cfg.load_dir, 'gan_2.pt'), os.path.join(cfg.load_dir, 'gan_opt_2.pt')),
+            (os.path.join(cfg.load_dir, 'gan_3.pt'), os.path.join(cfg.load_dir, 'gan_opt_3.pt')),
+        ]
+        expected_paths = [model_path, opt_path] + [p for pair in gan_paths for p in pair]
+        missing = [p for p in expected_paths if not os.path.exists(p)]
+        if len(missing) > 0:
+            raise FileNotFoundError(f"Missing checkpoint files: {missing}")
+
+        model_state = torch.load(model_path, map_location='cpu')
+        if any(k.startswith('module.') for k in model_state.keys()):
+            model_state = {k.replace('module.', '', 1): v for k, v in model_state.items()}
+        translator.load_state_dict(model_state, strict=False)
+        opt.load_state_dict(torch.load(opt_path, map_location='cpu'))
+
+        discriminators = [disc, sup_disc, latent_disc, similarity_disc]
+        discriminator_opts = [disc_opt, sup_disc_opt, latent_disc_opt, similarity_disc_opt]
+        for (disc_state_path, opt_state_path), discriminator, discriminator_opt in zip(gan_paths, discriminators, discriminator_opts):
+            disc_state = torch.load(disc_state_path, map_location='cpu')
+            if any(k.startswith('module.') for k in disc_state.keys()):
+                disc_state = {k.replace('module.', '', 1): v for k, v in disc_state.items()}
+            discriminator.load_state_dict(disc_state)
+            discriminator_opt.load_state_dict(torch.load(opt_state_path, map_location='cpu'))
 
     translator, opt, scheduler = accelerator.prepare(translator, opt, scheduler)
     disc, disc_opt, disc_scheduler = accelerator.prepare(disc, disc_opt, disc_scheduler)
@@ -515,12 +538,6 @@ def main():
     if hasattr(cfg, 'unsup_points'):
         sup_iter = iter(sup_dataloader)
 
-    if hasattr(cfg, 'val_size') and hasattr(cfg, 'patience') and hasattr(cfg, 'min_delta'):
-        early_stopper = EarlyStopper(patience=cfg.patience, min_delta=cfg.min_delta, increase=False)
-        early_stopping = True
-    else:
-        early_stopping = False
-
     for epoch in range(max_num_epochs):
         if use_val_set:
             with torch.no_grad(), accelerator.autocast():
@@ -548,16 +565,6 @@ def main():
                 wandb.log(val_res)
                 translator.train()
 
-            if epoch >= cfg.min_epochs and early_stopping:
-                score = np.mean([v for k, v in val_res.items() if '_rank ' in k])
-                print(f"Score: {score}, early_stopper.counter: {early_stopper.counter}, early_stopper.opt_val: {early_stopper.opt_val}")
-                if early_stopper.counter == 0 and score < early_stopper.opt_val:
-                    print(f"Saving model (counter = {early_stopper.counter})... {score} < {early_stopper.opt_val} is the best score so far...")
-                    save_everything(cfg, translator, opt, [gan, sup_gan, latent_gan, similarity_gan], save_dir)
-                if early_stopper.early_stop(score):
-                    print("Early stopping...")
-                    break
-
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:
@@ -583,6 +590,10 @@ def main():
             logger=logger,
             max_num_batches=max_num_batches
         )
+
+        if (epoch + 1) % 5 == 0:
+            print(f"Saving checkpoints at epoch {epoch + 1}...")
+            save_everything(cfg, translator, opt, [gan, sup_gan, latent_gan, similarity_gan], save_dir)
 
     with open(save_dir + 'config.toml', 'w') as f:
         toml.dump(cfg.__dict__, f)
