@@ -90,29 +90,53 @@ def contrastive_loss_fn(ins, translations, logger) -> torch.Tensor:
             count += 1
     return loss / count
 
-def vsp_loss_fn(ins, translations, logger) -> torch.Tensor:
+def vsp_loss_fn(ins, translations, logger, original: bool = True, reflect: bool = True) -> torch.Tensor:
+    """
+    VSP (Vector Space Preservation) loss function.
+    
+    Args:
+        ins: Input embeddings dictionary
+        translations: Translation embeddings dictionary
+        logger: Logger for metrics
+        original: If True, use ins[out_name] for B; if False, use ins[in_name] for B
+        reflect: Whether to include reflection loss
+    
+    Returns:
+        VSP loss tensor
+    """
     loss = None
     EPS = 1e-10
     count = 0
     for out_name in ins.keys():
         for in_name in translations[out_name].keys():
-            B = ins[out_name].detach()
+            # Choose which input to use for similarity computation
+            if original:
+                B = ins[out_name].detach()  # Use output embeddings
+            else:
+                B = ins[in_name].detach()   # Use input embeddings
+                
             B = B / (B.norm(dim=1, keepdim=True) + EPS)
             in_sims = B @ B.T
             A = translations[out_name][in_name]
             A = A / (A.norm(dim=1, keepdim=True) + EPS)
             out_sims = A @ A.T
-            out_sims_reflected = A @ B.T
             vsp_loss = (in_sims - out_sims).abs().mean()
-            vsp_loss_reflected = (in_sims - out_sims_reflected).abs().mean()
-            if logger is not None:
-                logger.logkv(f"{in_name}_{out_name}_vsp", vsp_loss)
-                logger.logkv(f"{in_name}_{out_name}_vsp_reflected", vsp_loss_reflected)
 
             if loss is None:
-                loss = vsp_loss + vsp_loss_reflected
+                loss = vsp_loss
             else:
-                loss += vsp_loss + vsp_loss_reflected
+                loss += vsp_loss
+
+            if reflect:
+                out_sims_reflected = A @ B.T
+                vsp_loss_reflected = (in_sims - out_sims_reflected).abs().mean()
+                loss += vsp_loss_reflected
+
+            if logger is not None:
+                logger.logkv(f"{in_name}_{out_name}_vsp", vsp_loss)
+                if reflect:
+                    logger.logkv(f"{in_name}_{out_name}_vsp_reflected", vsp_loss_reflected)
+
             count += 1
     return loss / count
 

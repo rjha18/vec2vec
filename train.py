@@ -125,7 +125,7 @@ def training_loop_(
             recons_as_translations = { 
                 in_name: { in_name: val } for in_name, val in recons.items() 
             }
-            vsp_loss = vsp_loss_fn(ins, recons_as_translations, logger)
+            # vsp_loss = vsp_loss_fn(ins, recons_as_translations, logger, original=False, reflect=False)
             if (cfg.loss_coefficient_cc_rec > 0) or (cfg.loss_coefficient_cc_trans > 0):
                 cc_ins = {}
                 for out_flag in translations.keys():
@@ -134,7 +134,7 @@ def training_loop_(
                 cc_recons, cc_translations = translator(cc_ins)
                 cc_rec_loss = rec_loss_fn(ins, cc_recons, logger, prefix="cc_")
                 cc_trans_loss = trans_loss_fn(ins, cc_translations, logger, prefix="cc_")
-                cc_vsp_loss = vsp_loss_fn(ins, cc_translations, logger)
+                cc_vsp_loss = vsp_loss_fn(ins, cc_translations, logger, original=True, reflect=cfg.vsp_reflect)
             else:
                 cc_rec_loss = torch.tensor(0.0)
                 cc_trans_loss = torch.tensor(0.0)
@@ -143,7 +143,7 @@ def training_loop_(
             loss = (
                 + (rec_loss * cfg.loss_coefficient_rec)
                 + (reverse_rec_loss * cfg.loss_coefficient_reverse_rec)
-                + (vsp_loss * cfg.loss_coefficient_vsp)
+                # + (vsp_loss * cfg.loss_coefficient_vsp)
                 + (cc_vsp_loss * cfg.loss_coefficient_cc_vsp)
                 + (cc_rec_loss * cfg.loss_coefficient_cc_rec)
                 + (cc_trans_loss * cfg.loss_coefficient_cc_trans)
@@ -176,7 +176,7 @@ def training_loop_(
                 "similarity_r1_penalty": similarity_r1_penalty.item(),
                 "rec_loss": rec_loss.item(),
                 "reverse_rec_loss": reverse_rec_loss.item(),
-                "vsp_loss": vsp_loss.item(),
+                # "vsp_loss": vsp_loss.item(),
                 "cc_vsp_loss": cc_vsp_loss.item(),
                 "cc_rec_loss": cc_rec_loss.item(),
                 "cc_trans_loss": cc_trans_loss.item(),
