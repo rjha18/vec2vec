@@ -126,7 +126,7 @@ def main():
     evalloader = accelerator.prepare(evalloader)
     encoders = {**sup_encs, **unsup_enc}
 
-    if 'clip' in cfg.sup_emb or 'clip' in cfg.unsup_emb:
+    if 'clip' in cfg.sup_emb or 'clip' in cfg.unsup_emb or 'qwen' in cfg.sup_emb or 'qwen' in cfg.unsup_emb:
         methods = ['gromov-wasserstein']
         dims_mismatch = True
     else:
