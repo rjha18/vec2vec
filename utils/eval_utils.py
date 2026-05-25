@@ -347,7 +347,30 @@ def eval_loop_(
     text_batches = cfg.text_batches if hasattr(cfg, 'text_batches') else 0
     with torch.no_grad():
         for i, batch in enumerate(data_iter):
-            ins = process_batch(batch, encoders, cfg.normalize_embeddings, device)
+            if encoders is None:
+                # Precomputed embeddings path (e.g., fMRI). Batch may be dict with view keys or wrapped.
+                if not isinstance(batch, dict):
+                    raise TypeError(f"Precomputed eval expected batch to be a dict, got {type(batch).__name__}.")
+                tensor_keys = [k for k in batch if isinstance(batch.get(k), torch.Tensor) and batch[k].dim() == 2]
+                if len(tensor_keys) < 2:
+                    raise KeyError(
+                        f"Precomputed eval expected batch with at least two 2D tensor keys; got keys {list(batch.keys())}."
+                    )
+                if cfg.sup_emb in batch and cfg.unsup_emb in batch:
+                    ins = {
+                        cfg.sup_emb: batch[cfg.sup_emb].to(device=device, dtype=torch.float32),
+                        cfg.unsup_emb: batch[cfg.unsup_emb].to(device=device, dtype=torch.float32),
+                    }
+                else:
+                    tensor_keys = sorted(tensor_keys)[:2]
+                    ins = {
+                        cfg.sup_emb: batch[tensor_keys[0]].to(device=device, dtype=torch.float32),
+                        cfg.unsup_emb: batch[tensor_keys[1]].to(device=device, dtype=torch.float32),
+                    }
+                if cfg.normalize_embeddings:
+                    ins = {k: F.normalize(v, p=2, dim=1) for k, v in ins.items()}
+            else:
+                ins = process_batch(batch, encoders, cfg.normalize_embeddings, device)
             recons, translations = translator(ins, include_reps=False)
             
             r_res, t_res = eval_batch(ins, recons, translations)
@@ -358,7 +381,12 @@ def eval_loop_(
                 batch_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, heatmap_size, cfg.k)
                 batch_res.update(create_heatmap(translator, ins, cfg.unsup_emb, cfg.sup_emb, cfg.top_k_size, heatmap_size, cfg.k))
                 merge_dicts(heatmap_res, batch_res)
-            if i < text_batches and inverters is not None and (cfg.sup_emb in inverters or cfg.unsup_emb in inverters):
+            if (
+                encoders is not None
+                and i < text_batches
+                and inverters is not None
+                and (cfg.sup_emb in inverters or cfg.unsup_emb in inverters)
+            ):
                 t_r_res, t_t_res = text_batch(ins, recons, translations, inverters, encoders, cfg.normalize_embeddings, cfg.max_seq_length, device)
                 merge_dicts(text_recon_res, t_r_res)
                 merge_dicts(text_translation_res, t_t_res)

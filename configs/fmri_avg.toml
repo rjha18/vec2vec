@@ -1,0 +1,100 @@
+[general]
+seed = 5
+sampling_seed = 5
+train_dataset_seed = 10
+val_dataset_seed = 42
+normalize_embeddings = true
+mixed_precision = 'no'
+weight_init = 'kaiming'
+dataset = "fmri-avg"
+sup_emb = "sub-01"
+unsup_emb = "sub-02"
+noise_level = 0.0
+finetune_mode = false
+
+
+[fmri]
+fmri_data_dir = "fmri"
+fmri_format = "avg"
+fmri_seed = 42
+fmri_train_on_overlap = false
+# Used only when fmri_train_on_overlap = true
+fmri_overlap_train_size = 800
+fmri_overlap_eval_size = 200
+# Always-overlap eval size (when train_on_overlap=false this is the eval split size)
+fmri_avg_eval_size = 1000
+
+[translator]
+style = 'res_mlp'
+norm_style = 'batch'
+depth = 1
+transform_depth = 1
+d_adapter = 128
+d_hidden = 128
+d_transform = 128
+use_small_output_adapters = false
+use_residual_adapters = true
+
+[discriminator]
+gan_style = "least_squares"
+disc_depth = 3
+disc_dim = 128
+use_residual = true
+
+[train]
+epochs = 500
+bs = 128
+gradient_accumulation_steps = 1
+optimizer = "adam"
+lr = 2e-5
+no_scheduler = true
+max_grad_norm = 1000.0
+loss_coefficient_reverse_rec = 0.0
+loss_coefficient_rec = 1.0
+loss_coefficient_vsp = 1.0
+loss_coefficient_cc_trans = 10.0
+loss_coefficient_cc_rec = 0.0
+loss_coefficient_cc_vsp = 10.0
+loss_coefficient_r1_penalty = 0.0
+warmup_length = 2000
+patience = 20
+min_delta = 0.0
+min_epochs = 80
+train_drop_last = true
+
+# Used by optimizer=adamw|muonw
+weight_decay = 0.01
+adamw_eps = 1.0e-8
+# Used by optimizer=muonw
+muon_beta = 0.95
+muon_ns_steps = 5
+muon_adamw_lr = 2e-5
+muon_adamw_weight_decay = 0.0
+
+[gan]
+disc_lr = 1e-5
+eps = 6.25e-10
+smooth = 0.9
+loss_coefficient_disc = 1.0
+loss_coefficient_gen = 1.0
+loss_coefficient_latent_gen = 1.0
+loss_coefficient_similarity_gen = 0.0
+
+[eval]
+val_bs = 1024
+top_k_size = 1024
+top_k_batches = 4
+k = 16
+heatmap_size = 64
+eval_every = 1
+
+[logging]
+use_wandb = true
+wandb_project = 'fmri_disc'
+wandb_name = 'fmri_avg'
+save_dir = './runs_fmri_avg/{}/'
+force_dump = true
+
+
+
+# python train.py fmri_avg --transform_depth 3 --disc_depth 4 --depth 1 --sup_emb sub-01 --unsup_emb sub-02 --note avg --epochs 1000000 --eval_every 150 --bs 8192 --d_transform 256 --d_adapter 256 --d_hidden 256 --lr 4e-5 --disc_lr 2e-5

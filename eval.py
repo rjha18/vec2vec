@@ -17,6 +17,8 @@ from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings
 
+from fmri.data import FmriSplitConfig, load_fmri_train_and_eval_datasets
+
 
 def main():
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
@@ -40,68 +42,106 @@ def main():
     # https://github.com/huggingface/transformers/issues/26548
     accelerator.dataloader_config.dispatch_batches = False
 
-    dset = load_streaming_embeddings(cfg.dataset)
+    fmri_mode = str(cfg.dataset).startswith("fmri")
+    if fmri_mode:
+        fmt = getattr(cfg, "fmri_format", "avg" if str(cfg.dataset).endswith("avg") else "trial")
+        split_cfg = FmriSplitConfig(
+            data_dir=getattr(cfg, "fmri_data_dir", "fmri"),
+            fmt=fmt,
+            seed=int(getattr(cfg, "fmri_seed", 42)),
+            train_on_overlap=bool(getattr(cfg, "fmri_train_on_overlap", False)),
+            avg_train_size=int(getattr(cfg, "fmri_overlap_train_size", getattr(cfg, "fmri_avg_train_size", 500))),
+            avg_val_size=int(getattr(cfg, "fmri_overlap_eval_size", getattr(cfg, "fmri_avg_val_size", 500))),
+            avg_eval_size=int(getattr(cfg, "fmri_avg_eval_size", 1000)),
+            trial_train_images=int(
+                getattr(cfg, "fmri_overlap_train_images", getattr(cfg, "fmri_trial_train_images", 500))
+            ),
+            trial_val_images=int(
+                getattr(cfg, "fmri_overlap_eval_images", getattr(cfg, "fmri_trial_val_images", 500))
+            ),
+            trial_eval_images=int(getattr(cfg, "fmri_trial_eval_images", 1000)),
+        )
+        _, _, val_paired, embed_dim = load_fmri_train_and_eval_datasets(
+            cfg=split_cfg,
+            sup_name=cfg.sup_emb,
+            unsup_name=cfg.unsup_emb,
+            sup_subject=int(getattr(cfg, "fmri_sup_subject", 1)),
+            unsup_subject=int(getattr(cfg, "fmri_unsup_subject", 2)),
+        )
+        sup_encs = {}
+        unsup_enc = {}
+        encoder_dims = {cfg.sup_emb: int(embed_dim), cfg.unsup_emb: int(embed_dim)}
+        translator = load_n_translator(cfg, encoder_dims)
+    else:
+        dset = load_streaming_embeddings(cfg.dataset)
 
-    sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)}
-    encoder_dims = {cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])}
-    translator = load_n_translator(cfg, encoder_dims)
+        sup_encs = {cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)}
+        encoder_dims = {cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])}
+        translator = load_n_translator(cfg, encoder_dims)
 
     assert hasattr(cfg, 'unsup_emb')
     assert cfg.sup_emb != cfg.unsup_emb
 
-    unsup_enc = {
-        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
-    }
-    unsup_dim = {
-        cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
-    }
-    translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
+    if not fmri_mode:
+        unsup_enc = {
+            cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
+        }
+        unsup_dim = {
+            cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
+        }
+        translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
 
     if cfg.style != 'identity':
-        assert cfg.unsup_emb not in sup_encs
+        if not fmri_mode:
+            assert cfg.unsup_emb not in sup_encs
         assert cfg.unsup_emb in translator.in_adapters
         assert cfg.unsup_emb in translator.out_adapters
 
         cfg.num_params = sum(x.numel() for x in translator.parameters())
         print("Number of parameters:", cfg.num_params)
 
-    dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
-    dset = dset_dict["train"]
-    valset = dset_dict["test"]
-
-    assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
-    dset = dset.shuffle(seed=cfg.train_dataset_seed)
-    if hasattr(cfg, 'num_points'):
-        assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
-        supset = dset.select(range(cfg.num_points))
-        unsupset = dset.select(range(cfg.num_points, cfg.num_points + cfg.val_size))
-    elif hasattr(cfg, 'unsup_points'):
-        unsupset = dset.select(range(min(cfg.unsup_points, cfg.val_size)))
-        supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
-
     num_workers = get_num_proc()
-    evalset = MultiencoderTokenizedDataset(
-        dataset=supset if hasattr(cfg, 'flip') and cfg.flip else unsupset,
-        encoders={ **unsup_enc, **sup_encs },
-        n_embs_per_batch=2,
-        batch_size=cfg.val_bs,
-        max_length=cfg.max_seq_length,
-        seed=cfg.sampling_seed,
-    )
+    if fmri_mode:
+        evalset = val_paired
+        encoders_for_eval = None
+    else:
+        dset_dict = dset.train_test_split(test_size=cfg.val_size, seed=cfg.val_dataset_seed)
+        dset = dset_dict["train"]
+        valset = dset_dict["test"]
+
+        assert hasattr(cfg, 'num_points') or hasattr(cfg, 'unsup_points')
+        dset = dset.shuffle(seed=cfg.train_dataset_seed)
+        if hasattr(cfg, 'num_points'):
+            assert cfg.num_points > 0 and cfg.num_points <= len(dset) // 2
+            supset = dset.select(range(cfg.num_points))
+            unsupset = dset.select(range(cfg.num_points, cfg.num_points + cfg.val_size))
+        elif hasattr(cfg, 'unsup_points'):
+            unsupset = dset.select(range(min(cfg.unsup_points, cfg.val_size)))
+            supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
+
+        evalset = MultiencoderTokenizedDataset(
+            dataset=supset if hasattr(cfg, 'flip') and cfg.flip else unsupset,
+            encoders={ **unsup_enc, **sup_encs },
+            n_embs_per_batch=2,
+            batch_size=cfg.val_bs,
+            max_length=cfg.max_seq_length,
+            seed=cfg.sampling_seed,
+        )
+        encoders_for_eval = {**sup_encs, **unsup_enc}
+    eval_batch_size = min(cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs, len(evalset))
     evalloader = DataLoader(
         evalset,
-        batch_size=cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
+        batch_size=eval_batch_size,
         num_workers=num_workers,
         shuffle=False,
         pin_memory=True,
         prefetch_factor=(8 if num_workers > 0 else None),
         collate_fn=TokenizedCollator(),
-        drop_last=True,
+        drop_last=False,
     )
     evalloader = accelerator.prepare(evalloader)
 
     if cfg.style != 'identity':
-        assert hasattr(cfg, 'load_dir')
         print(f"Loading models from {argv[1]}...")
         translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
 
@@ -116,7 +156,7 @@ def main():
             eval_loop_(
                 cfg,
                 translator,
-                {**sup_encs, **unsup_enc},
+                encoders_for_eval,
                 evalloader,
                 inverters=inverters,
                 device=accelerator.device

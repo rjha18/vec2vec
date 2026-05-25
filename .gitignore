@@ -23,3 +23,5 @@ old*
 data/
 viz/
 latex/
+runs_fmri_avg/
+runs_fmri_trial/

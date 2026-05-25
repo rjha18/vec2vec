@@ -19,6 +19,7 @@ from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.eval_utils import EarlyStopper, eval_loop_
 from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
+from utils.muon import MuonW
 from utils.utils import *
 from utils.streaming_utils import load_streaming_embeddings, process_batch
 from utils.train_utils import rec_loss_fn, trans_loss_fn, vsp_loss_fn, get_grad_norm
@@ -26,8 +27,77 @@ from utils.wandb_logger import Logger
 
 from datasets import load_from_disk
 
+from fmri.data import FmriSplitConfig, load_fmri_train_and_eval_datasets
+
+
+def _split_muon_params(model: torch.nn.Module):
+    matrix_params = []
+    scalar_vector_params = []
+    for _, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if p.ndim >= 2:
+            matrix_params.append(p)
+        else:
+            scalar_vector_params.append(p)
+    return matrix_params, scalar_vector_params
+
+
+def build_generator_optimizers(cfg, translator):
+    opt_name = str(getattr(cfg, "optimizer", "adam")).lower()
+    if opt_name == "adam":
+        return [torch.optim.Adam(translator.parameters(), lr=cfg.lr, fused=False, betas=(0.5, 0.999))]
+    if opt_name == "adamw":
+        return [torch.optim.AdamW(
+            translator.parameters(),
+            lr=cfg.lr,
+            betas=tuple(getattr(cfg, "adamw_betas", (0.9, 0.999))),
+            eps=float(getattr(cfg, "adamw_eps", 1e-8)),
+            weight_decay=float(getattr(cfg, "weight_decay", 0.01)),
+        )]
+    if opt_name in ("muon", "muonw"):
+        matrix_params, scalar_vector_params = _split_muon_params(translator)
+        optimizers = []
+        if len(matrix_params) > 0:
+            if hasattr(torch.optim, "Muon"):
+                optimizers.append(
+                    torch.optim.Muon(
+                        matrix_params,
+                        lr=cfg.lr,
+                        momentum=float(getattr(cfg, "muon_beta", 0.95)),
+                        weight_decay=float(getattr(cfg, "weight_decay", 0.01)),
+                        ns_steps=int(getattr(cfg, "muon_ns_steps", 5)),
+                    )
+                )
+            else:
+                optimizers.append(
+                    MuonW(
+                        matrix_params,
+                        lr=cfg.lr,
+                        weight_decay=float(getattr(cfg, "weight_decay", 0.01)),
+                        muon_beta=float(getattr(cfg, "muon_beta", 0.95)),
+                        adamw_betas=tuple(getattr(cfg, "adamw_betas", (0.9, 0.95))),
+                        adamw_eps=float(getattr(cfg, "adamw_eps", 1e-8)),
+                        ns_steps=int(getattr(cfg, "muon_ns_steps", 5)),
+                    )
+                )
+        if len(scalar_vector_params) > 0:
+            # Best practice with Muon: keep biases/norm/scalars on AdamW (usually no WD).
+            optimizers.append(
+                torch.optim.AdamW(
+                    scalar_vector_params,
+                    lr=float(getattr(cfg, "muon_adamw_lr", cfg.lr)),
+                    betas=tuple(getattr(cfg, "adamw_betas", (0.9, 0.95))),
+                    eps=float(getattr(cfg, "adamw_eps", 1e-8)),
+                    weight_decay=float(getattr(cfg, "muon_adamw_weight_decay", 0.0)),
+                )
+            )
+        return optimizers
+    raise ValueError(f"Unknown optimizer: {opt_name}. Expected one of: adam, adamw, muonw")
+
+
 def training_loop_(
-    save_dir, accelerator, gan, sup_gan, latent_gan, similarity_gan, translator, sup_dataloader, sup_iter, unsup_dataloader, sup_encs, unsup_enc, cfg, opt, scheduler, logger=None, max_num_batches=None
+    save_dir, accelerator, gan, sup_gan, latent_gan, similarity_gan, translator, sup_dataloader, sup_iter, unsup_dataloader, sup_encs, unsup_enc, cfg, gen_optimizers, gen_schedulers, logger=None, max_num_batches=None
 ):
     device = accelerator.device
     if logger is None:
@@ -63,10 +133,20 @@ def training_loop_(
             break
         with accelerator.accumulate(translator), accelerator.autocast():
             assert len(set(sup_batch.keys()).intersection(unsup_batch.keys())) == 0
-            ins = {
-                **process_batch(sup_batch, sup_encs, cfg.normalize_embeddings, device), 
-                **process_batch(unsup_batch, unsup_enc, cfg.normalize_embeddings, device)
-            }
+            if str(cfg.dataset).startswith("fmri"):
+                ins = {}
+                for k, v in {**sup_batch, **unsup_batch}.items():
+                    if not torch.is_tensor(v):
+                        raise ValueError(f"Expected tensor batch value for key={k}")
+                    vv = v.to(device=device, dtype=torch.float32)
+                    if cfg.normalize_embeddings:
+                        vv = vv / (vv.norm(p=2, dim=1, keepdim=True) + 1e-12)
+                    ins[k] = vv
+            else:
+                ins = {
+                    **process_batch(sup_batch, sup_encs, cfg.normalize_embeddings, device),
+                    **process_batch(unsup_batch, unsup_enc, cfg.normalize_embeddings, device),
+                }
 
             recons, translations, reps = translator(
                 ins, noise_level=cfg.noise_level, include_reps=True
@@ -153,7 +233,8 @@ def training_loop_(
                 + (similarity_gen_loss * cfg.loss_coefficient_similarity_gen)
             )
             exit_on_nan(loss)
-            opt.zero_grad()
+            for optimizer in gen_optimizers:
+                optimizer.zero_grad()
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(translator.parameters(), cfg.max_grad_norm)
             grad_norm_generator = get_grad_norm(translator)
@@ -162,8 +243,10 @@ def training_loop_(
             grad_norm_latent_discriminator = get_grad_norm(latent_gan.discriminator)
             grad_norm_similarity_discriminator = get_grad_norm(similarity_gan.discriminator)
 
-            opt.step()
-            scheduler.step()
+            for optimizer in gen_optimizers:
+                optimizer.step()
+            for scheduler in gen_schedulers:
+                scheduler.step()
 
             metrics = {
                 "disc_loss": disc_loss.item(),
@@ -190,7 +273,7 @@ def training_loop_(
                 "grad_norm_sup_discriminator": grad_norm_sup_discriminator,
                 "grad_norm_latent_discriminator": grad_norm_latent_discriminator,
                 "grad_norm_similarity_discriminator": grad_norm_similarity_discriminator,
-                "learning_rate": opt.param_groups[0]["lr"],
+                "learning_rate": gen_optimizers[0].param_groups[0]["lr"],
                 "disc_acc_real": disc_acc_real,
                 "disc_acc_fake": disc_acc_fake,
                 "latent_disc_acc_real": latent_disc_acc_real,
@@ -232,7 +315,8 @@ def main():
     np.random.seed(cfg.seed)
     torch.cuda.manual_seed(cfg.seed)
 
-    use_val_set = hasattr(cfg, 'val_size')
+    fmri_mode = str(cfg.dataset).startswith("fmri")
+    use_val_set = fmri_mode or hasattr(cfg, 'val_size')
 
     accelerator = accelerate.Accelerator(
         mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') and cfg.mixed_precision != 'no' else None,
@@ -257,13 +341,45 @@ def main():
     print("Running Experiment:", cfg.wandb_name)
 
 
-    sup_encs = {
-        cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
-    }
-    encoder_dims = {
-        cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])
-    }
-    translator = load_n_translator(cfg, encoder_dims)
+    if fmri_mode:
+        fmt = getattr(cfg, "fmri_format", "avg" if str(cfg.dataset).endswith("avg") else "trial")
+        split_cfg = FmriSplitConfig(
+            data_dir=getattr(cfg, "fmri_data_dir", "fmri"),
+            fmt=fmt,
+            seed=int(getattr(cfg, "fmri_seed", 42)),
+            train_on_overlap=bool(getattr(cfg, "fmri_train_on_overlap", False)),
+            avg_train_size=int(getattr(cfg, "fmri_overlap_train_size", getattr(cfg, "fmri_avg_train_size", 500))),
+            avg_val_size=int(getattr(cfg, "fmri_overlap_eval_size", getattr(cfg, "fmri_avg_val_size", 500))),
+            avg_eval_size=int(getattr(cfg, "fmri_avg_eval_size", 1000)),
+            trial_train_images=int(
+                getattr(cfg, "fmri_overlap_train_images", getattr(cfg, "fmri_trial_train_images", 500))
+            ),
+            trial_val_images=int(
+                getattr(cfg, "fmri_overlap_eval_images", getattr(cfg, "fmri_trial_val_images", 500))
+            ),
+            trial_eval_images=int(getattr(cfg, "fmri_trial_eval_images", 1000)),
+        )
+        supset, unsupset, val_paired, embed_dim = load_fmri_train_and_eval_datasets(
+            cfg=split_cfg,
+            sup_name=cfg.sup_emb,
+            unsup_name=cfg.unsup_emb,
+            sup_subject=int(getattr(cfg, "fmri_sup_subject", 1)),
+            unsup_subject=int(getattr(cfg, "fmri_unsup_subject", 2)),
+        )
+        valset_paired = val_paired
+
+        sup_encs = {}
+        unsup_enc = {}
+        encoder_dims = {cfg.sup_emb: int(embed_dim), cfg.unsup_emb: int(embed_dim)}
+        translator = load_n_translator(cfg, encoder_dims)
+    else:
+        sup_encs = {
+            cfg.sup_emb: load_encoder(cfg.sup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
+        }
+        encoder_dims = {
+            cfg.sup_emb: get_sentence_embedding_dimension(sup_encs[cfg.sup_emb])
+        }
+        translator = load_n_translator(cfg, encoder_dims)
 
     model_save_dir = os.path.join(save_dir, 'model.pt')
     disc_save_dir = os.path.join(save_dir, 'disc.pt')
@@ -273,17 +389,18 @@ def main():
     assert hasattr(cfg, 'unsup_emb')
     assert cfg.sup_emb != cfg.unsup_emb
 
-    unsup_enc = {
-        cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
-    }
-    unsup_dim = {
-        cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
-    }
-    translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
+    if not fmri_mode:
+        unsup_enc = {
+            cfg.unsup_emb: load_encoder(cfg.unsup_emb, mixed_precision=cfg.mixed_precision if hasattr(cfg, 'mixed_precision') else None)
+        }
+        unsup_dim = {
+            cfg.unsup_emb: get_sentence_embedding_dimension(unsup_enc[cfg.unsup_emb])
+        }
+        translator.add_encoders(unsup_dim, overwrite_embs=[cfg.unsup_emb])
 
-    assert cfg.unsup_emb not in sup_encs
-    assert cfg.unsup_emb in translator.in_adapters
-    assert cfg.unsup_emb in translator.out_adapters
+        assert cfg.unsup_emb not in sup_encs
+        assert cfg.unsup_emb in translator.in_adapters
+        assert cfg.unsup_emb in translator.out_adapters
 
     cfg.num_params = sum(x.numel() for x in translator.parameters())
     print("Number of parameters:", cfg.num_params)
@@ -298,7 +415,10 @@ def main():
     )
 
     num_workers = min(get_num_proc(), 8)
-    if cfg.dataset != 'mimic':
+    if fmri_mode:
+        # Precomputed fMRI datasets were constructed above.
+        pass
+    elif cfg.dataset != 'mimic':
         dset = load_streaming_embeddings(cfg.dataset)
         print(f"Using {num_workers} workers and {len(dset)} datapoints")
 
@@ -326,22 +446,23 @@ def main():
         valset = valset.remove_columns([col for col in valset.column_names if col != 'text'])
         
 
-    supset = MultiencoderTokenizedDataset(
-        dataset=supset,
-        encoders=sup_encs,
-        n_embs_per_batch=cfg.n_embs_per_batch,
-        batch_size=cfg.bs,
-        max_length=cfg.max_seq_length,
-        seed=cfg.sampling_seed,
-    )
-    unsupset = MultiencoderTokenizedDataset(
-        dataset=unsupset,
-        encoders=unsup_enc,
-        n_embs_per_batch=1,
-        batch_size=cfg.bs,
-        max_length=cfg.max_seq_length,
-        seed=cfg.sampling_seed,
-    )
+    if not fmri_mode:
+        supset = MultiencoderTokenizedDataset(
+            dataset=supset,
+            encoders=sup_encs,
+            n_embs_per_batch=cfg.n_embs_per_batch,
+            batch_size=cfg.bs,
+            max_length=cfg.max_seq_length,
+            seed=cfg.sampling_seed,
+        )
+        unsupset = MultiencoderTokenizedDataset(
+            dataset=unsupset,
+            encoders=unsup_enc,
+            n_embs_per_batch=1,
+            batch_size=cfg.bs,
+            max_length=cfg.max_seq_length,
+            seed=cfg.sampling_seed,
+        )
 
     sup_dataloader = DataLoader(
         supset,
@@ -351,7 +472,7 @@ def main():
         pin_memory=True,
         prefetch_factor=None,
         collate_fn=TokenizedCollator(),
-        drop_last=True,
+        drop_last=cfg.train_drop_last if hasattr(cfg, 'train_drop_last') else not fmri_mode,
     )
     unsup_dataloader = DataLoader(
         unsupset,
@@ -361,31 +482,35 @@ def main():
         pin_memory=True,
         prefetch_factor=None,
         collate_fn=TokenizedCollator(),
-        drop_last=True,
+        drop_last=cfg.train_drop_last if hasattr(cfg, 'train_drop_last') else not fmri_mode,
     )
 
     if use_val_set:
-        valset = MultiencoderTokenizedDataset(
-            dataset=valset,
-            encoders={ **unsup_enc, **sup_encs },
-            n_embs_per_batch=2,
-            batch_size=cfg.val_bs,
-            max_length=cfg.max_seq_length,
-            seed=cfg.sampling_seed,
-        )
+        if fmri_mode:
+            valset = valset_paired
+        else:
+            valset = MultiencoderTokenizedDataset(
+                dataset=valset,
+                encoders={ **unsup_enc, **sup_encs },
+                n_embs_per_batch=2,
+                batch_size=cfg.val_bs,
+                max_length=cfg.max_seq_length,
+                seed=cfg.sampling_seed,
+            )
+        val_batch_size = min(cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs, len(valset))
         valloader = DataLoader(
             valset,
-            batch_size=cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
+            batch_size=val_batch_size,
             num_workers=num_workers,
             shuffle=False,
             pin_memory=True,
             prefetch_factor=(8 if num_workers > 0 else None),
             collate_fn=TokenizedCollator(),
-            drop_last=True,
+            drop_last=False,
         )
         valloader = accelerator.prepare(valloader)
 
-    opt = torch.optim.Adam(translator.parameters(), lr=cfg.lr, fused=False, betas=(0.5, 0.999))
+    gen_optimizers = build_generator_optimizers(cfg, translator)
     
     ######################################################################################
     disc = Discriminator(
@@ -436,7 +561,7 @@ def main():
     ######################################################################################
 
     max_num_epochs = int(np.ceil(cfg.epochs))
-    steps_per_epoch = len(supset) // cfg.bs
+    steps_per_epoch = (len(supset) + cfg.bs - 1) // cfg.bs if fmri_mode else len(supset) // cfg.bs
     total_steps = steps_per_epoch * cfg.epochs / cfg.gradient_accumulation_steps
     warmup_length = (cfg.warmup_length if hasattr(cfg, 'warmup_length') else 100)
 
@@ -448,7 +573,7 @@ def main():
                 return 1
             return 1 - (step - warmup_length) / max(1, total_steps - warmup_length)
 
-    scheduler = LambdaLR(opt, lr_lambda=lr_lambda)
+    gen_schedulers = [LambdaLR(opt_, lr_lambda=lr_lambda) for opt_ in gen_optimizers]
     disc_scheduler = LambdaLR(disc_opt, lr_lambda=lr_lambda)
     sup_disc_scheduler = LambdaLR(sup_disc_opt, lr_lambda=lr_lambda)
     latent_disc_scheduler = LambdaLR(latent_disc_opt, lr_lambda=lr_lambda)
@@ -460,7 +585,11 @@ def main():
         translator.load_state_dict(torch.load(cfg.load_dir + 'model.pt', map_location='cpu'), strict=False)
         disc.load_state_dict(torch.load(cfg.load_dir + 'disc.pt', map_location='cpu'))
 
-    translator, opt, scheduler = accelerator.prepare(translator, opt, scheduler)
+    prepared = accelerator.prepare(translator, *gen_optimizers, *gen_schedulers)
+    translator = prepared[0]
+    n_gen_opt = len(gen_optimizers)
+    gen_optimizers = list(prepared[1 : 1 + n_gen_opt])
+    gen_schedulers = list(prepared[1 + n_gen_opt : 1 + n_gen_opt + len(gen_schedulers)])
     disc, disc_opt, disc_scheduler = accelerator.prepare(disc, disc_opt, disc_scheduler)
     sup_disc, sup_disc_opt, sup_disc_scheduler = accelerator.prepare(sup_disc, sup_disc_opt, sup_disc_scheduler)
     latent_disc, latent_disc_opt, latent_disc_scheduler = accelerator.prepare(latent_disc, latent_disc_opt, latent_disc_scheduler)
@@ -520,13 +649,16 @@ def main():
         early_stopping = True
     else:
         early_stopping = False
+    eval_every = max(1, int(getattr(cfg, "eval_every", 1)))
 
     for epoch in range(max_num_epochs):
-        if use_val_set:
+        should_eval = use_val_set and (epoch % eval_every == 0)
+        if should_eval:
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
-                recons, trans, heatmap_dict, _, _, _ = eval_loop_(cfg, translator, {**sup_encs, **unsup_enc}, valloader, device=accelerator.device)
+                encs = None if fmri_mode else {**sup_encs, **unsup_enc}
+                recons, trans, heatmap_dict, _, _, _ = eval_loop_(cfg, translator, encs, valloader, device=accelerator.device)
                 for flag, res in recons.items():
                     for k, v in res.items():
                         if k == 'cos':
@@ -556,7 +688,7 @@ def main():
                     break
                 if early_stopper.counter == 0 and score < early_stopper.opt_val:
                     print(f"Saving model (counter = {early_stopper.counter})... {score} < {early_stopper.opt_val} is the best score so far...")
-                    save_everything(cfg, translator, opt, [gan, sup_gan, latent_gan, similarity_gan], save_dir)
+                    save_everything(cfg, translator, gen_optimizers[0], [gan, sup_gan, latent_gan, similarity_gan], save_dir)
 
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
@@ -578,8 +710,8 @@ def main():
             sup_encs=sup_encs,
             unsup_enc=unsup_enc,
             cfg=cfg,
-            opt=opt,
-            scheduler=scheduler,
+            gen_optimizers=gen_optimizers,
+            gen_schedulers=gen_schedulers,
             logger=logger,
             max_num_batches=max_num_batches
         )
