@@ -101,4 +101,27 @@ Same as objective_descent: STABLE < 5x sup, PARTIAL < 100, else DRIFTS/FAIL.
 
 ## Results
 
-(fill as jobs land; job table below)
+### E1 (2026-07-06, jobs 767673-6): PREDICTION REFUTED — ICP basin survives
+the conjunction cell
+
+| cell | pert (rad) | init rank | final rank | verdict |
+|---|---|---|---|---|
+| same-dataset | 1.5 | 392 | **2.7** | STABLE (reproduces v2 icpbasin_1.5 exactly — reimpl validated) |
+| conjunction | 0.5 | 1.0 | **1.2** | STABLE |
+| conjunction | 1.0 | 3.1 | **1.5** | STABLE (converges TO truth) |
+| conjunction | 1.5 | 392 | **41.6** | PARTIAL (vs 2.7 same-dataset; vs energy's 261 from same init) |
+
+Delta to model: the assignment-free principle does NOT extend to ICP —
+CSLS mutual-NN pairs across different corpora are good-enough
+correspondences (semantically-nearest FineWeb neighbors of NQ points are
+approximately correct pairs, unlike SWD's monotone sort or Sinkhorn's
+balanced plan). **v2's localization claim survives on the conjunction cell:
+the coarse matcher budget is ~1.0-1.5 rad, and ICP remains the finisher.**
+ICP also dominates energy as a refiner from deep inits (41.6 vs 261 from
+1.5 rad).
+
+Metric note: the STABLE solutions sit at 70-83 deg MEAN eigenphase from
+R_true while scoring rank ~1 — the rotation is only pinned on the ~128-d
+signal subspace; the complement is free. Mean-eigenphase drift is therefore
+also a misleading summary (as was the null SVD metric); drift should be
+reported restricted to the shared signal subspace.
