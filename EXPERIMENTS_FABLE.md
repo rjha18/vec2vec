@@ -125,3 +125,46 @@ R_true while scoring rank ~1 — the rotation is only pinned on the ~128-d
 signal subspace; the complement is free. Mean-eigenphase drift is therefore
 also a misleading summary (as was the null SVD metric); drift should be
 reported restricted to the shared signal subspace.
+
+### E2 (jobs 767677/8): the stall is NOT simple gradient noise — it is a
+transient pass NEAR truth followed by drift to a displaced optimum
+
+| cell | pert | eff. batch | trajectory | final |
+|---|---|---|---|---|
+| conj | 1.0 | 32k | init 3.1 -> **min 1.9 @ step 250** -> rises | 8.0 (baseline 8.4) |
+| conj | 1.5 | 32k | init 392 -> **min 134.5 @ step 2000** -> rises | 243.7 (baseline 261) |
+
+Delta to model: with 16x larger batches the non-monotone shape persists →
+the empirical energy optimum on these finite mismatched clouds is DISPLACED
+from R_true, but the descent PATH passes near truth before settling there.
+End-of-descent rank is the wrong deliverable; the trajectory minimum is —
+and 134 is inside ICP's conjunction basin (E1: ICP recovered from init 392).
+**Actionable: chain = short big-batch energy descent -> checkpoint by the
+validated unsupervised CSLS criterion -> ICP.** Fleet 2 (jobs 767750-4)
+tests this from 1.5/2.0/2.5 rad with ICP-only controls.
+
+### E3 (jobs 767679-81): GNC/annealed smoothing REFUTED — noise destroys
+the signal instead of revealing a coarse basin
+
+pert 1.5: 392 -> 811 (rises steadily during high sigma, never recovers);
+pert 2.0: 2402 -> 2196 (stuck); random init: 2063 -> 2019 (stuck).
+
+Delta to model: there is NO coarse-scale basin to exploit — Gaussian
+smoothing makes the clouds more isotropic, which is exactly the degeneracy.
+ALL the alignment signal is fine-scale. This deepens the isotropy-wall
+picture (it is a statement about coarse/smoothed views in general, not just
+second-order statistics) and explains why the GAN's coarse-to-fine works
+where blurring does not: adaptive witness features are feature SELECTION,
+not isotropic smoothing.
+
+### E4 (jobs 767682-4): ICA matcher FAILS its within-lineage control —
+disqualified as implemented
+
+gte-e5 control: coarse 1401, after ICP 1051 (sup 1.0) → FAIL. Same-dataset
+1712, conjunction 2246. Matched-marginal costs are similar across cells
+(~0.025-0.033), i.e. the matcher cannot distinguish right from wrong axis
+pairings. Synthetic oracle diagnostic (smoke) showed FastICA sample
+instability + PCA-tail mismatch + weak marginal signatures each contribute.
+The fourth-order route is not fundamentally refuted (a joint
+cumulant-tensor alignment could still work where per-axis matching fails),
+but per program discipline this implementation is dead. Prior lowered.

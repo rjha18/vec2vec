@@ -100,6 +100,10 @@ def main():
     p.add_argument("--sigma_start", type=float, default=0.0, help="GNC: initial noise std added to BOTH clouds")
     p.add_argument("--sigma_end", type=float, default=0.0)
     p.add_argument("--sigma_frac", type=float, default=0.85, help="fraction of steps over which sigma anneals; rest at sigma_end")
+    p.add_argument("--icp_after", type=int, default=0,
+                   help="if >0: after descent, restart from the best-CSLS checkpoint "
+                        "(unsupervised selection) and run this many ICP iterations")
+    p.add_argument("--csls_sub", type=int, default=8000, help="subsample for the CSLS criterion")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True)
     args = p.parse_args()
@@ -151,6 +155,28 @@ def main():
         return float(args.sigma_start * (lo / args.sigma_start) ** t) if args.sigma_end > 0 \
             else float(args.sigma_start * (1.0 - t))
 
+    # unsupervised checkpoint criterion (validated in v2 as a within-family
+    # argmax selector): mean CSLS similarity of mutual-NN matches on the
+    # unpaired train clouds. The trajectory dip past truth is invisible to
+    # the energy value itself (descent keeps lowering it while rank rises),
+    # so checkpoints must be selected by an independent unsupervised signal.
+    csub = min(args.csls_sub, n, ntr_y)
+    Xc, Yc = Xtr[:csub], Ytr[:csub]
+
+    def csls_criterion(Q):
+        xq = normalize(Xc @ Q.T)
+        s = xq @ Yc.T
+        r_x = s.topk(10, dim=1).values.mean(1)
+        r_y = s.T.topk(10, dim=1).values.mean(1)
+        c = 2 * s - r_x[:, None] - r_y[None, :]
+        nn_xy = c.max(1).indices
+        nn_yx = c.max(0).indices
+        mutual = nn_yx[nn_xy] == torch.arange(len(xq), device=s.device)
+        if mutual.sum() == 0:
+            return -1e9, 0
+        return float(c.max(1).values[mutual].mean()), int(mutual.sum())
+
+    best_crit, best_Q, best_step = -1e9, base.clone(), 0
     traj = [(0, round(rank_init, 1), sigma_at(0))]
     for step in range(1, args.steps + 1):
         sig = sigma_at(step)
@@ -167,9 +193,14 @@ def main():
         opt.step()
         if step % 250 == 0 or step == args.steps:
             with torch.no_grad():
-                r = mean_rank(normalize(model(Xev)), Yev)
-            traj.append((step, round(r, 1), round(sig, 4)))
-            print(f"[energy bs{args.bs}x{args.accum} sig{sig:.3f}] step {step}: rank {r:.1f}", flush=True)
+                Qnow = model.matrix()
+                r = mean_rank(normalize(Xev @ Qnow.T), Yev)
+                crit, n_mutual = csls_criterion(Qnow)
+                if crit > best_crit:
+                    best_crit, best_Q, best_step = crit, Qnow.clone(), step
+            traj.append((step, round(r, 1), round(sig, 4), round(crit, 4), n_mutual))
+            print(f"[energy bs{args.bs}x{args.accum} sig{sig:.3f}] step {step}: rank {r:.1f} "
+                  f"csls {crit:.4f} mutual {n_mutual}", flush=True)
 
     with torch.no_grad():
         Q = model.matrix()
@@ -179,6 +210,41 @@ def main():
         ev = torch.linalg.eigvals((Q.T.cpu() @ Qsup).double())
         drift_deg = float(torch.rad2deg(ev.angle().abs()).mean())
 
+    icp_result = {}
+    if args.icp_after > 0:
+        # chain: restart from the best-unsupervised-criterion checkpoint and
+        # run CSLS mutual-NN ICP (the E1-validated finisher)
+        Q = best_Q
+        rank_best = mean_rank(normalize(Xev @ Q.T), Yev)
+        print(f"chain: best csls {best_crit:.4f} at step {best_step}, rank {rank_best:.1f}", flush=True)
+        sub = min(n, ntr_y, 20000)
+        Xs, Ys = Xtr[:sub], Ytr[:sub]
+        icp_traj = []
+        for it in range(args.icp_after):
+            with torch.no_grad():
+                xq = normalize(Xs @ Q.T)
+                s = xq @ Ys.T
+                r_x = s.topk(10, dim=1).values.mean(1)
+                r_y = s.T.topk(10, dim=1).values.mean(1)
+                c = 2 * s - r_x[:, None] - r_y[None, :]
+                nn_xy = c.max(1).indices
+                nn_yx = c.max(0).indices
+                keep = nn_yx[nn_xy] == torch.arange(len(xq), device=device)
+                pa = torch.arange(len(xq), device=device)[keep]
+                pb = nn_xy[keep]
+                if len(pa) < 50:
+                    break
+                W, _ = orthogonal_procrustes(Xs[pa].cpu().numpy(), Ys[pb].cpu().numpy())
+                Q = torch.from_numpy(W.T).float().to(device)
+                r = mean_rank(normalize(Xev @ Q.T), Yev)
+            icp_traj.append((it, round(r, 1), int(len(pa))))
+            if it % 5 == 0 or it == args.icp_after - 1:
+                print(f"icp {it}: {len(pa)} pairs, rank {r:.1f}", flush=True)
+        r_chain = mean_rank(normalize(Xev @ Q.T), Yev)
+        icp_result = {"best_csls": best_crit, "best_csls_step": best_step,
+                      "rank_at_best_csls": rank_best, "rank_after_chain_icp": r_chain,
+                      "icp_trajectory": icp_traj}
+
     result = {
         "emb_a": args.emb_a, "emb_b": args.emb_b, "emb_b_train": args.emb_b_train,
         "init": args.init, "perturb_angle": args.perturb_angle, "seed": args.seed,
@@ -187,6 +253,7 @@ def main():
         "rank_supervised": rank_sup, "rank_init": rank_init, "rank_final": r_final,
         "drift_deg_from_truth": drift_deg, "trajectory": traj,
         "verdict": "STABLE" if r_final < 5 * max(rank_sup, 1) else ("PARTIAL" if r_final < 100 else "DRIFTS"),
+        **icp_result,
     }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     json.dump(result, open(args.out, "w"), indent=1)
