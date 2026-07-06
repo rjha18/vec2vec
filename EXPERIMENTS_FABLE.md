@@ -168,3 +168,42 @@ instability + PCA-tail mismatch + weak marginal signatures each contribute.
 The fourth-order route is not fundamentally refuted (a joint
 cumulant-tensor alignment could still work where per-axis matching fails),
 but per program discipline this implementation is dead. Prior lowered.
+
+### E5 / fleet 2 (jobs 767750-4): chain (energy -> CSLS checkpoint -> ICP)
+FAILS — two separable causes
+
+| run | init | energy end | CSLS-selected step | rank there | chain final |
+|---|---|---|---|---|---|
+| chain 1.5 | 392 | 205 | 6000 (= end) | 205 | 253 |
+| chain 2.0 | 2402 | 2363 | 6000 (= end) | 2363 | 2260 |
+| chain 2.5 | 3237 | 3353 | 6000 (= end) | 3353 | 3005 |
+| icp-only 2.0 | 2401 | — | — | — | 2280 (DRIFTS) |
+| icp-only 2.5 | 3237 | — | — | — | 2911 (DRIFTS) |
+
+Two findings:
+1. **The unsupervised CSLS criterion is monotone along the descent** (rises
+   0.007 -> 0.017 while rank passes through its dip and back up), so it
+   selects the ENDPOINT, never the dip. It measures distributional coupling,
+   not registration — consistent with v2's "criterion detects solved runs,
+   cannot rank partial ones". No unsupervised dip-detector yet.
+2. **Equal rank does NOT mean equal ICP-basin membership.** ICP recovers
+   from a rank-392 random perturbation of truth (E1: -> 41.6) but NOT from
+   the rank-205 energy-drifted rotation (-> 253). Energy's drift
+   concentrates error in the retrieval-critical directions (a weaker
+   version of the SWD pathology); random perturbations spread it
+   isotropically. Basin membership is direction-dependent, not
+   rank-dependent — direction-resolved geometry (Hessian spectrum, P2
+   queue) is the right next diagnostic.
+
+Also: ICP-only controls confirm ICP's conjunction basin ends between 1.5
+and 2.0 rad.
+
+### E5b (jobs 767928/9, oracle ceiling — measuring instrument): is the
+trajectory DIP inside ICP's basin?
+
+Oracle-select the best-rank checkpoint (instead of CSLS) and run ICP from
+it. If the dip point converges -> the chain concept survives and ONLY
+unsupervised dip-selection is missing. If not -> the energy path never
+enters ICP's basin and the chain is dead.
+
+(pending)

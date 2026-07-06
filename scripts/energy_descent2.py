@@ -103,6 +103,10 @@ def main():
     p.add_argument("--icp_after", type=int, default=0,
                    help="if >0: after descent, restart from the best-CSLS checkpoint "
                         "(unsupervised selection) and run this many ICP iterations")
+    p.add_argument("--oracle_select", action="store_true",
+                   help="MEASURING INSTRUMENT ONLY: select the ICP-restart checkpoint by "
+                        "held-out rank instead of CSLS. Decomposes a chain failure into "
+                        "selection-failure vs basin-failure; never part of a method.")
     p.add_argument("--csls_sub", type=int, default=8000, help="subsample for the CSLS criterion")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True)
@@ -177,6 +181,7 @@ def main():
         return float(c.max(1).values[mutual].mean()), int(mutual.sum())
 
     best_crit, best_Q, best_step = -1e9, base.clone(), 0
+    best_rank, best_rank_Q, best_rank_step = rank_init, base.clone(), 0
     traj = [(0, round(rank_init, 1), sigma_at(0))]
     for step in range(1, args.steps + 1):
         sig = sigma_at(step)
@@ -198,6 +203,8 @@ def main():
                 crit, n_mutual = csls_criterion(Qnow)
                 if crit > best_crit:
                     best_crit, best_Q, best_step = crit, Qnow.clone(), step
+                if r < best_rank:
+                    best_rank, best_rank_Q, best_rank_step = r, Qnow.clone(), step
             traj.append((step, round(r, 1), round(sig, 4), round(crit, 4), n_mutual))
             print(f"[energy bs{args.bs}x{args.accum} sig{sig:.3f}] step {step}: rank {r:.1f} "
                   f"csls {crit:.4f} mutual {n_mutual}", flush=True)
@@ -214,9 +221,12 @@ def main():
     if args.icp_after > 0:
         # chain: restart from the best-unsupervised-criterion checkpoint and
         # run CSLS mutual-NN ICP (the E1-validated finisher)
-        Q = best_Q
+        if args.oracle_select:
+            Q, sel_step = best_rank_Q, best_rank_step
+        else:
+            Q, sel_step = best_Q, best_step
         rank_best = mean_rank(normalize(Xev @ Q.T), Yev)
-        print(f"chain: best csls {best_crit:.4f} at step {best_step}, rank {rank_best:.1f}", flush=True)
+        print(f"chain: selected ({'ORACLE' if args.oracle_select else 'csls'}) step {sel_step}, rank {rank_best:.1f}", flush=True)
         sub = min(n, ntr_y, 20000)
         Xs, Ys = Xtr[:sub], Ytr[:sub]
         icp_traj = []
@@ -242,6 +252,7 @@ def main():
                 print(f"icp {it}: {len(pa)} pairs, rank {r:.1f}", flush=True)
         r_chain = mean_rank(normalize(Xev @ Q.T), Yev)
         icp_result = {"best_csls": best_crit, "best_csls_step": best_step,
+                      "oracle_select": args.oracle_select, "selected_step": sel_step,
                       "rank_at_best_csls": rank_best, "rank_after_chain_icp": r_chain,
                       "icp_trajectory": icp_traj}
 
