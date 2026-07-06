@@ -206,4 +206,20 @@ it. If the dip point converges -> the chain concept survives and ONLY
 unsupervised dip-selection is missing. If not -> the energy path never
 enters ICP's basin and the chain is dead.
 
-(pending)
+**RESULT (767928): the chain is DEAD — even the oracle-selected dip is
+poorly ICP-recoverable.** From 1.5 rad: dip at step 1750 (rank 134) -> ICP
+-> 71.5. Compare ICP-alone from the RAW 1.5-rad init (rank 392) -> 41.6.
+The energy stage makes basin membership WORSE even while improving rank:
+its descent concentrates the residual error into the retrieval-critical /
+ICP-pathological directions. Rank is not a basin coordinate; direction of
+error is. (2.0-rad twin pending; energy shows no dip from 2.0, expect FAIL.)
+
+Delta to model: energy descent is only useful ON-basin (<= 0.5 rad, where it
+is stable at truth); as a mid-range transporter it actively harms. The
+surviving recipe is unchanged from E1: ANY coarse init within ~1.0-1.5 rad
+-> ICP. The entire program still reduces to the coarse matcher, but E1
+showed the target is more forgiving than feared (ICP tolerates cross-corpus
+mutual-NN pairs). Highest-value next diagnostics: direction-resolved
+Hessian/error analysis (WHY are energy-drifted errors ICP-pathological?),
+and the P2 queue (1M gates, unbalanced OT, consistency-graph pair
+distillation).
