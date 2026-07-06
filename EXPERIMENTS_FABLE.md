@@ -212,7 +212,8 @@ poorly ICP-recoverable.** From 1.5 rad: dip at step 1750 (rank 134) -> ICP
 The energy stage makes basin membership WORSE even while improving rank:
 its descent concentrates the residual error into the retrieval-critical /
 ICP-pathological directions. Rank is not a basin coordinate; direction of
-error is. (2.0-rad twin pending; energy shows no dip from 2.0, expect FAIL.)
+error is. (2.0-rad twin 767929 CONFIRMED the pre-registered expectation:
+no dip exists from 2.0 rad — init 2402, best 2389 at step 750, ICP 2327.)
 
 Delta to model: energy descent is only useful ON-basin (<= 0.5 rad, where it
 is stable at truth); as a mid-range transporter it actively harms. The
