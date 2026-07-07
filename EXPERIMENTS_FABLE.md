@@ -277,6 +277,33 @@ Q2 (is the min-max game essential?) is now THE question, with a mechanistic
 target: does the GAN's witness make the registration direction locally
 dominant? (C1 replay + direction-resolved lens on ganconj/gan2080.)
 
+## UNE integration (2026-07-07, jobs 778215-7, user pointer to arXiv:2603.21786)
+
+Pre-registered: (1) clouds near-Gaussian in the complement, markedly
+non-Gaussian in the signal subspace; (2) top-kurtotic pursuit directions
+correspond across encoders under R_true. **BOTH REFUTED, informatively:**
+
+1. **Text embeddings are ~93% Gaussian EVERYWHERE** (signal 93% / complement
+   92% / full 94% normality pass; mean|kurt| ~0.23) — more Gaussian than
+   UNE's vision encoders (81-92%). No non-Gaussian skeleton in the signal
+   subspace. The direction law's curvature concentration is SECOND-order
+   (variance mass), not higher-order. Margin decomposition: large
+   covariance part (rotation-degenerate = isotropy wall) + thin DIFFUSE
+   higher-order residual (~7%). The entropic trap's distributional cause:
+   descent harvests the covariance part; only the whisper remains for
+   registration.
+2. **Pursuit directions do NOT correspond across encoders** — even
+   within-lineage gte-e5 oracle cos 0.04-0.17. Kurtosis extremes are
+   encoder-specific artifacts. Projection-pursuit matcher dead pre-build;
+   "GAN = per-cloud pursuit" framing dead (survives only as joint-cloud
+   contrast).
+
+Paper-level statement this yields: text embedding clouds are ~93% Gaussian
+— nearly maximally rotationally symmetric — and unsupervised alignability
+lives entirely in a thin, diffuse, partly encoder-specific non-Gaussian
+residual. Strong out-of-domain support for UNE; the sharpest one-line
+explanation of the negative-space table.
+
 ## Fleet 3 (2026-07-07 overnight, jobs 777321-777331) — pre-registrations
 
 **F-A `direction_resolved.py` (777321):** panel of error rotations (random
