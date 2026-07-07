@@ -320,19 +320,37 @@ Also: ganconj s5/s9 checkpoint evals at 21h = rank 2184/1927 of 4096
 (~random) -> DEAD by the pruning rule. Two seeds is not a verdict; fleet
 decision pending.
 
-## Tether theory (2026-07-07, jobs 778330-5, running)
+## Tether theory (2026-07-07, jobs 778330-5) — THE ~500-CORRESPONDENCE LAW
 
 Unsupervised analogue of the 500-gold-pair knee: ICP is a tether
-BOOTSTRAP — alignment Q generates ~10k noisy mutual-NN tethers, tethers
-refit Q; N tethers of quality rho ~ N*rho^2 gold pairs; the basin edge is
-the self-sustainment (percolation) threshold where tether quality stops
-improving under iteration. Instrumented with oracle per-tether
-precision@10 (gtr-NQ as instrument) + dynamic tether selection
-(keep_frac by CSLS margin). Pre-registered: (a) precision trajectories
-separate converging (rising precision = runaway bootstrap) from stalling
-runs at the same rank; (b) top-30% tether selection extends the basin
-edge beyond 1.5-1.7 rad by trading recall for precision where precision
-binds.
+BOOTSTRAP — alignment Q generates noisy mutual-NN tethers, tethers refit
+Q; the basin edge is the self-sustainment (percolation) threshold.
+Instrumented with oracle per-tether precision@10 (gtr-NQ instrument).
+
+**RESULT — supervised and unsupervised converge on ONE number.** Effective
+good tethers (N x precision@10) along ICP trajectories on the conjunction
+cell:
+- pert 1.5 (converges 392->42): 72 -> 245 -> 379 -> **683** — crosses the
+  supervised bridge knee (200-500) and runs away.
+- pert 1.7 (stalls 1133->800): 11 -> 53 -> **70, saturates** — dies exactly
+  BELOW the knee.
+- pert 2.0 (dead): ~0-5.
+**The currency of alignment is ~500 effective correspondences, however
+obtained** — supervision buys them directly (bridge sweep), a within-basin
+init mints them via mutual-NN, nothing at 90 deg can mint them.
+
+**Dynamic tether selection REFUTED (prediction b):** top-30% by CSLS margin
+gives ZERO precision gain (5.15% vs 5.22% — CSLS confidence is uncorrelated
+with per-tether correctness, unifying with fleet-2's criterion blindness)
+while cutting N 6x -> effective ~45 -> kills a converging case (392->422).
+Diversity of noisy tethers beats confidence-filtered few: Procrustes wants
+error-averaging mass.
+
+**Scaling corollary under test (778356-8):** margin is population-flat, but
+tether COUNT scales with cloud size and neighbor quality with density —
+if p1.7's 70-effective stall crosses ~500 at 32k-sub/250k-cache scale, the
+basin edge is SAMPLE-limited (scale mints tethers even though it does not
+sharpen geometry).
 
 ## Fleet 3 (2026-07-07 overnight, jobs 777321-777331) — pre-registrations
 
