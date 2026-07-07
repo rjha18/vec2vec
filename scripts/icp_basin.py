@@ -53,7 +53,9 @@ def random_rotation_near(d, angle, gen):
     return torch.matrix_exp(skew)
 
 
-def csls_mutual(xq, y, k=10):
+def csls_mutual(xq, y, k=10, keep_frac=1.0):
+    """Mutual-NN tethers under CSLS; optionally keep only the top keep_frac
+    by CSLS score (dynamic tether selection: precision over recall)."""
     device = xq.device
     r_x = (xq @ y.T).topk(k, dim=1).values.mean(1)
     r_y = (y @ xq.T).topk(k, dim=1).values.mean(1)
@@ -61,7 +63,14 @@ def csls_mutual(xq, y, k=10):
     nn_xy = s.max(1).indices
     nn_yx = s.max(0).indices
     keep = nn_yx[nn_xy] == torch.arange(len(xq), device=device)
-    return torch.arange(len(xq), device=device)[keep], nn_xy[keep]
+    pa = torch.arange(len(xq), device=device)[keep]
+    pb = nn_xy[keep]
+    if keep_frac < 1.0 and len(pa) > 50:
+        scores = s[pa, pb]
+        m = max(50, int(len(pa) * keep_frac))
+        top = scores.topk(m).indices
+        pa, pb = pa[top], pb[top]
+    return pa, pb
 
 
 def angle_to(Q, Qref):
@@ -90,6 +99,11 @@ def main():
     p.add_argument("--icp_iters", type=int, default=40)
     p.add_argument("--icp_sub", type=int, default=20000)
     p.add_argument("--csls_k", type=int, default=10)
+    p.add_argument("--keep_frac", type=float, default=1.0,
+                   help="dynamic tether selection: keep only this top fraction of mutual pairs by CSLS score")
+    p.add_argument("--oracle_b", default="",
+                   help="MEASURING INSTRUMENT: emb_b-space embeddings of emb_a's texts (e.g. gtr-NQ), "
+                        "row-aligned with emb_a, for per-tether precision@10 logging")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True)
     args = p.parse_args()
@@ -125,23 +139,39 @@ def main():
 
     sub = min(n, len(Ytr), args.icp_sub)
     Xs, Ys = Xtr[:sub], Ytr[:sub]
-    traj = [(-1, round(rank_init, 1), 0)]
+
+    # oracle tether precision: matched target j is 'good' if Ys[j] is within
+    # the top-10 target-cloud neighbors of the source's TRUE b-space embedding
+    oracle_top = None
+    if args.oracle_b:
+        ob = normalize(torch.load(args.oracle_b, map_location="cpu", weights_only=True))
+        ob_sub = ob[ia][:sub].to(device)
+        tops = []
+        for i in range(0, sub, 2048):
+            tops.append((ob_sub[i:i + 2048] @ Ys.T).topk(10, dim=1).indices)
+        oracle_top = torch.cat(tops)
+
+    traj = [(-1, round(rank_init, 1), 0, None)]
     for it in range(args.icp_iters):
         with torch.no_grad():
             xq = normalize(Xs @ Q.T)
-            pa, pb = csls_mutual(xq, Ys, k=args.csls_k)
+            pa, pb = csls_mutual(xq, Ys, k=args.csls_k, keep_frac=args.keep_frac)
             if len(pa) < 50:
                 print(f"icp {it}: only {len(pa)} pairs, stopping", flush=True)
                 break
+            prec = None
+            if oracle_top is not None:
+                prec = round(float((oracle_top[pa] == pb[:, None]).any(1).float().mean()), 4)
             W, _ = orthogonal_procrustes(Xs[pa].cpu().numpy(), Ys[pb].cpu().numpy())
             Q = torch.from_numpy(W.T).float().to(device)
             r = mean_rank(normalize(Xev @ Q.T), Yev)
-        traj.append((it, round(r, 1), int(len(pa))))
-        print(f"icp {it}: {len(pa)} pairs, rank {r:.1f}", flush=True)
+        traj.append((it, round(r, 1), int(len(pa)), prec))
+        print(f"icp {it}: {len(pa)} pairs, rank {r:.1f}, tether precision@10 {prec}", flush=True)
 
     r_final = mean_rank(normalize(Xev @ Q.T), Yev)
     result = {
         "emb_a": args.emb_a, "emb_b": args.emb_b, "emb_b_train": args.emb_b_train,
+        "keep_frac": args.keep_frac, "oracle_b": args.oracle_b,
         "perturb_angle": args.perturb_angle, "seed": args.seed, "n_train": n,
         "icp_sub": sub, "rank_supervised": rank_sup, "rank_init": rank_init,
         "rank_final": r_final, "drift_deg_from_truth": angle_to(Q, Qsup),

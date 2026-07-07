@@ -304,6 +304,36 @@ lives entirely in a thin, diffuse, partly encoder-specific non-Gaussian
 residual. Strong out-of-domain support for UNE; the sharpest one-line
 explanation of the negative-space table.
 
+## Support-overlap dose-response (2026-07-07, jobs 778275-8, single seed)
+
+Oracle injection of true-support mass (gtr-NQ tail) into the gtr-FW cloud;
+mini QAP+ICP. Curve: f=0 -> 2005 (known), 0.1 -> 2147, 0.25 -> 2248,
+0.5 -> 1904, 0.75 -> 431 fwd / 90 bwd (partial, asymmetric), 1.0 -> ~5-16
+(known). **The QAP-machinery threshold is HIGH (between 0.75 and 1.0);
+modest realistic overlap does NOT rescue the hard cell for cluster
+matching.** Caveats: single seed; QAP-specific (the FW admixture is
+exactly QAP's bimodality pathology, one-sided here since the source stays
+pure). A distributional method (GAN) may sit lower — the motivated GAN
+fleet is at f=0.5/0.75 under the 8-seed/pruning protocol.
+
+Also: ganconj s5/s9 checkpoint evals at 21h = rank 2184/1927 of 4096
+(~random) -> DEAD by the pruning rule. Two seeds is not a verdict; fleet
+decision pending.
+
+## Tether theory (2026-07-07, jobs 778330-5, running)
+
+Unsupervised analogue of the 500-gold-pair knee: ICP is a tether
+BOOTSTRAP — alignment Q generates ~10k noisy mutual-NN tethers, tethers
+refit Q; N tethers of quality rho ~ N*rho^2 gold pairs; the basin edge is
+the self-sustainment (percolation) threshold where tether quality stops
+improving under iteration. Instrumented with oracle per-tether
+precision@10 (gtr-NQ as instrument) + dynamic tether selection
+(keep_frac by CSLS margin). Pre-registered: (a) precision trajectories
+separate converging (rising precision = runaway bootstrap) from stalling
+runs at the same rank; (b) top-30% tether selection extends the basin
+edge beyond 1.5-1.7 rad by trading recall for precision where precision
+binds.
+
 ## Fleet 3 (2026-07-07 overnight, jobs 777321-777331) — pre-registrations
 
 **F-A `direction_resolved.py` (777321):** panel of error rotations (random
