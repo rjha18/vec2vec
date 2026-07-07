@@ -263,4 +263,59 @@ Closes v3 B1's planned-but-never-implemented cell.
 **F-E encodes (777330-1):** fineweb-gtr 250k + NQ gte,gtr 250k for
 tomorrow's large-N margin points and scale-honest gates.
 
-(results pending)
+### Fleet 3 RESULTS (2026-07-07 overnight)
+
+**F-A CONFIRMED — the direction law.** Random perturbations keep
+signal-subspace displacement at the isotropic baseline (0.17-0.22 = 128/768)
+at every angle; ICP forgives them to 1.5 rad (edge 1.5-1.7). Energy-drifted
+rotations concentrate 0.36-0.45 of displacement in the signal subspace and
+ICP recovery tracks that fraction, NOT rank (energy rank-135/sig-0.40 -> 76;
+random rank-392/sig-0.20 -> 44). SWD-from-truth snapshots at 2k/4k steps:
+rank still 1.0 but sig-frac already 0.37 — v2's "SWD moves in the
+retrieval-critical subspace" claim is VINDICATED under the corrected metric
+(the old 0.7-deg number was the null-metric artifact; the direction claim
+was right). Gamma-spectrum: signal-plane curvature ~0.91 vs complement
+~0.0008 (1000x) at identical parametrization; grad SNR at bs2048: 4.7
+(signal) vs 1.2 (complement). The objective constrains ONLY the signal
+subspace; the complement is free (why rank-1 solutions sit 70-83 deg from
+R_true).
+
+**F-B DEAD — consistency-graph matcher fails its within-lineage control**
+(gte-e5 1835; same 1951; conj 2009; all ~random). The synthetic success
+(34 -> 6.1) did not transfer: 768-d distance concentration kills both the
+kNN-profile descriptors and the pairwise consistency test. Last classical
+mechanism on the list; the isotropy/concentration wall is now 8-for-8.
+
+**F-C REFUTED (my prediction) — the margin is FLAT in N.** Conjunction:
+27.8-28.0 sigma at N = 5k, 10k, 20k, 28k, 60k, 122k (250k-cache extension
+job 777522). Same-dataset: 30.4-30.5 sigma, equally flat. The margin is a
+POPULATION property, fully resolved at 5k points; the spread across random
+rotations is landscape variation, not sampling noise. Support mismatch
+costs only ~10% of the gap (0.99 vs 1.09). Consequence: scale does NOT
+sharpen static marginal geometry — a 1M run can only help through training
+DYNAMICS (weakens the scale-rescue hope for ganconj; sharpens the
+interpretation of whatever it does).
+
+**F-D REFUTED — unbalanced Sinkhorn drifts like balanced** (truth -> 143;
+0.5 -> 228; 1.0 -> 373). KL mass-relaxation does not fix transport
+mis-coupling. The assignment-free principle sharpens: ANY objective with a
+coupling mechanism mis-registers under support mismatch; energy remains
+unique. v3 B1's planned unbalanced-OT cell is now closed.
+
+**F-E DONE:** 250k paired NQ (gte,gtr) at `out/emb_nq_250k`, 250k
+FineWeb-gtr at `out/emb_fineweb_250k` (main checkout).
+
+### Program state after three fleets (audit 2026-07-07)
+
+Established: identified-on-signal-subspace with margin ~28 sigma flat in N;
+ICP finisher solved to 1.5 rad cross-corpus; energy unique-but-local;
+recoverability governed by signal-subspace error fraction (the design law).
+Dead with mechanisms: GW/cov/spectral/QAP (isotropy), descriptors +
+consistency graph (concentration), ICA (estimator instability), GNC (no
+coarse-scale signal), reweighting (marginals coincide), random restarts
+(volume), energy-transport/chain (direction poisoning; criterion blind),
+unbalanced OT (coupling). Standing: (1) GAN mechanism dissection (ganconj +
+C1 replay, through the direction-resolved lens: does D move the map in
+signal directions first?), (2) amortized/meta-learned aligner (untried
+class; access-model scope decision needed), (3) the characterization paper
+("identified but unfindable"), now with quantitative teeth.
