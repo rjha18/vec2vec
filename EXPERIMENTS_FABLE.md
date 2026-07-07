@@ -225,6 +225,40 @@ Hessian/error analysis (WHY are energy-drifted errors ICP-pathological?),
 and the P2 queue (1M gates, unbalanced OT, consistency-graph pair
 distillation).
 
+## Fleet 4 (2026-07-07, user directives: bug audit / cheap runs / adaptive method)
+
+**Norm-channel audit (enc 777559/60): CLOSED — the signal does not exist.**
+Caches are unit-norm because the ENCODER ARCHITECTURES normalize internally:
+re-encoding with normalize_embeddings=False still yields norm cv = 0.0 for
+gte/gtr/e5. Row-normalization in our scripts is a no-op (orthogonal maps
+preserve norms) — no validity bug, and no untapped norm channel for these
+encoder families.
+
+**Geodesic probe (777565): THE FUNNEL IS REAL AND UNOBSTRUCTED.** All 6
+geodesics from random rotations to R_true are PERFECTLY monotone (max
+uphill step 0.0), descending smoothly 1.05 -> 0.087 on the conjunction
+cell. There are no barriers on straight paths — descent failures at long
+range are noise- or direction-limited, not blocked. This is the strongest
+optimism result since E1.
+
+**Funnel-SA v1 (777566-70): FAILS — underpowered, not disproven.** From
+random, 30k Metropolis steps with random signal-plane proposals barely
+descend (best L 0.88-1.07 vs true 0.087); control fails too. Random-
+direction proposals pay ~1/dim(SO(128)); SA as implemented does ~4 gradient
+steps' worth of work. (p20 variant crashed: device-mismatch bug, fixed.)
+If revived: gradient-informed proposals (MALA) or much larger moves.
+
+**Tension -> decisive missing cell (777584/5, running):** monotone geodesics
+from EVERY random start mean nonzero gradient along the funnel everywhere on
+those paths — yet descent "stalls" from >= 2.0 rad. Audit of the record
+shows plain big-batch descent from >= 2.0 rad / random WAS NEVER RUN (all
+long-range runs had bs 2048 or GNC noise). Now running: accum 32 (64k
+effective batch), 12k steps, from 2.0 rad and from random, with oracle-dip
+ICP handoff. If it descends the funnel, the conjunction cell may fall to
+plain big-batch energy descent + ICP; if it parks at L ~ 0.5-0.8, the
+entropic-trap picture (descent prefers transverse easy reductions) is
+confirmed and the next probe is geodesics FROM the stall point.
+
 ## Fleet 3 (2026-07-07 overnight, jobs 777321-777331) — pre-registrations
 
 **F-A `direction_resolved.py` (777321):** panel of error rotations (random

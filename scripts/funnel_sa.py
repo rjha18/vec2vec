@@ -147,7 +147,7 @@ def main():
         P = torch.randn(d, d, generator=torch.Generator().manual_seed(args.seed + 7))
         skew = P - P.T
         skew = skew / skew.norm() * args.perturb_angle * (d ** 0.5)
-        Q = (torch.matrix_exp(skew) @ Qsup).to(device)
+        Q = torch.matrix_exp(skew.to(device)) @ Qsup
 
     d_xx = cross_mean_dist(X, X)
     d_yy = cross_mean_dist(Y, Y)
