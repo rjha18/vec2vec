@@ -248,16 +248,34 @@ direction proposals pay ~1/dim(SO(128)); SA as implemented does ~4 gradient
 steps' worth of work. (p20 variant crashed: device-mismatch bug, fixed.)
 If revived: gradient-informed proposals (MALA) or much larger moves.
 
-**Tension -> decisive missing cell (777584/5, running):** monotone geodesics
-from EVERY random start mean nonzero gradient along the funnel everywhere on
+**Tension -> decisive missing cell (777584/5):** monotone geodesics from
+EVERY random start mean nonzero gradient along the funnel everywhere on
 those paths — yet descent "stalls" from >= 2.0 rad. Audit of the record
 shows plain big-batch descent from >= 2.0 rad / random WAS NEVER RUN (all
-long-range runs had bs 2048 or GNC noise). Now running: accum 32 (64k
-effective batch), 12k steps, from 2.0 rad and from random, with oracle-dip
-ICP handoff. If it descends the funnel, the conjunction cell may fall to
-plain big-batch energy descent + ICP; if it parks at L ~ 0.5-0.8, the
-entropic-trap picture (descent prefers transverse easy reductions) is
-confirmed and the next probe is geodesics FROM the stall point.
+long-range runs had bs 2048 or GNC noise). Ran: accum 32 (64k effective
+batch), 12k steps, from random, oracle-dip ICP handoff.
+
+**RESULT: ENTROPIC TRAP CONFIRMED (777585, random init).** Rank NEVER
+improved — the oracle-selected best checkpoint was STEP 0 (init 2063; every
+later step worse; final 2191, drift 90.1 deg) while energy steadily fell
+and distributional coupling rose ~8x (mutual-NN 1076 -> 8305). ICP from the
+end state: 2176 (nothing). At any batch size, energy descent from long
+range spends ALL its gradient on registration-free L-reductions (moment/
+shape matching) and none on registration. (2.0-rad twin still queued;
+outcome predictable.)
+
+**THE MECHANISM OF THE NO-REQUERY DIFFICULTY, stated plainly:** the funnel
+to truth exists and is unobstructed (geodesic probe), but the truth-ward
+component of the local gradient is negligible against the transverse bulk —
+the marginal objective's LOCAL geometry is blind to registration at long
+range. Every local method (descent at any batch size, GNC, value-SA with
+random moves, transport plans) dies on this one fact. It also states
+precisely what any working method must do: RESHAPE the local geometry so
+the registration direction dominates — which is exactly what an adaptive
+discriminator (feature selection) can do and isotropic mechanisms cannot.
+Q2 (is the min-max game essential?) is now THE question, with a mechanistic
+target: does the GAN's witness make the registration direction locally
+dominant? (C1 replay + direction-resolved lens on ganconj/gan2080.)
 
 ## Fleet 3 (2026-07-07 overnight, jobs 777321-777331) — pre-registrations
 
