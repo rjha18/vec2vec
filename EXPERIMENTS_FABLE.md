@@ -224,3 +224,43 @@ mutual-NN pairs). Highest-value next diagnostics: direction-resolved
 Hessian/error analysis (WHY are energy-drifted errors ICP-pathological?),
 and the P2 queue (1M gates, unbalanced OT, consistency-graph pair
 distillation).
+
+## Fleet 3 (2026-07-07 overnight, jobs 777321-777331) — pre-registrations
+
+**F-A `direction_resolved.py` (777321):** panel of error rotations (random
+perturbations at 6 angles, energy-descent snapshots along the 1.5-rad dip
+path, SWD-drift-from-truth) profiled by (rank, fraction of eval-point
+displacement inside the top-128 signal subspace, ICP outcome), plus the
+gamma-spectrum at R_true (full-cloud energy curvature + minibatch gradient
+SNR along signal / complement / random skew planes). Prediction: ICP
+recoverability anti-correlates with signal-subspace displacement fraction at
+matched rank; energy/SWD-drifted rotations concentrate displacement in the
+signal subspace (>> 128/768 baseline); curvature is concentrated in signal
+planes with LOW minibatch SNR (why descent needs big batches).
+
+**F-B `consistency_match.py` (777322-4):** kNN-profile descriptors ->
+candidate pairs -> spectral consistency filtering -> ~500 distilled pairs ->
+Procrustes -> ICP. Synthetic smoke: coarse 34 -> ICP 6.1 on the shifted cell
+(ICA scored 2246 on the same). Prediction (prior ~0.35 given the
+distance-concentration risk): within-lineage control passes; if same-dataset
+cross-lineage lands inside the 1.5-rad/rank-few-hundred regime and ICP
+finishes, this is the first correspondence-free coarse matcher to cross the
+lineage wall; conjunction is the stretch goal.
+
+**F-C `margin_vs_n.py` (777325-6):** identifiability margin (sigmas of
+L(R_rand) above L(R_true), full-batch energy) at N = 5k..60k, conj +
+same-dataset. Prediction: margin grows roughly like sqrt(N) (estimation-
+noise-limited) -> conjunction is solvable-at-scale; saturation would be the
+quantified barrier. Feeds the B3 theorem and decides whether 1M gates are
+worth the GPU-days.
+
+**F-D usinkhorn (777327-9):** debiased KL-relaxed (rho=1) unbalanced
+Sinkhorn descent on conj from pert 0/0.5/1.0. Balanced Sinkhorn drifted
+1->122 at matched budget; prediction: unbalancing removes the forced
+mis-coupling -> stays <5 at truth; basin at least energy's 0.5 rad.
+Closes v3 B1's planned-but-never-implemented cell.
+
+**F-E encodes (777330-1):** fineweb-gtr 250k + NQ gte,gtr 250k for
+tomorrow's large-N margin points and scale-honest gates.
+
+(results pending)

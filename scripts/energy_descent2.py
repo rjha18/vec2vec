@@ -51,6 +51,42 @@ def energy_distance(x, y):
     return 2.0 * d_xy - d_xx - d_yy
 
 
+def unbalanced_sinkhorn(x, y, eps=0.1, rho=1.0, n_iters=50):
+    """Debiased unbalanced entropic OT (KL-relaxed marginals, Chizat scaling).
+
+    Balanced Sinkhorn drifts on the conjunction cell because its plan MUST
+    transport all mass, coupling non-corresponding support. KL relaxation
+    (rho) lets unmatched mass be created/destroyed instead. Potentials are
+    computed without grad; the loss differentiates through the cost matrix
+    with the plan fixed (envelope gradient).
+    """
+    x, y = normalize(x), normalize(y)
+
+    def uot(u, v):
+        C = torch.cdist(u, v).pow(2)
+        n_, m_ = C.shape
+        la = -torch.log(torch.tensor(float(n_), device=C.device))
+        lb = -torch.log(torch.tensor(float(m_), device=C.device))
+        lam = rho / (rho + eps)
+        with torch.no_grad():
+            f = torch.zeros(n_, device=C.device)
+            g = torch.zeros(m_, device=C.device)
+            for _ in range(n_iters):
+                f = -lam * eps * torch.logsumexp((g[None, :] - C) / eps + lb, dim=1)
+                g = -lam * eps * torch.logsumexp((f[:, None] - C) / eps + la, dim=0)
+            log_pi = (f[:, None] + g[None, :] - C) / eps + la + lb
+            pi = log_pi.exp()
+        cost = (pi * C).sum()
+        with torch.no_grad():
+            pa, pb = pi.sum(1), pi.sum(0)
+            a, b = torch.full_like(pa, 1.0 / n_), torch.full_like(pb, 1.0 / m_)
+            kl_a = (pa * (pa / a).clamp_min(1e-30).log() - pa + a).sum()
+            kl_b = (pb * (pb / b).clamp_min(1e-30).log() - pb + b).sum()
+        return cost + rho * (kl_a + kl_b)
+
+    return uot(x, y) - 0.5 * uot(x, x) - 0.5 * uot(y, y)
+
+
 def mean_rank(pred, target, bs=2048):
     ranks = []
     for i in range(0, len(pred), bs):
@@ -89,6 +125,9 @@ def main():
     p.add_argument("--emb_a", required=True)
     p.add_argument("--emb_b", required=True, help="PAIRED with --emb_a (R_true fit + eval)")
     p.add_argument("--emb_b_train", default="", help="conjunction: unpaired cross-corpus target cloud")
+    p.add_argument("--objective", choices=["energy", "usinkhorn"], default="energy")
+    p.add_argument("--uot_eps", type=float, default=0.1)
+    p.add_argument("--uot_rho", type=float, default=1.0)
     p.add_argument("--init", choices=["perturbed_truth", "random"], default="perturbed_truth")
     p.add_argument("--perturb_angle", type=float, default=0.0)
     p.add_argument("--n_train", type=int, default=40000)
@@ -193,7 +232,10 @@ def main():
             if sig > 0:
                 xm = xm + sig * torch.randn_like(xm)
                 yi = yi + sig * torch.randn_like(yi)
-            loss = energy_distance(xm, yi) / args.accum
+            if args.objective == "usinkhorn":
+                loss = unbalanced_sinkhorn(xm, yi, eps=args.uot_eps, rho=args.uot_rho) / args.accum
+            else:
+                loss = energy_distance(xm, yi) / args.accum
             loss.backward()
         opt.step()
         if step % 250 == 0 or step == args.steps:
@@ -258,6 +300,7 @@ def main():
 
     result = {
         "emb_a": args.emb_a, "emb_b": args.emb_b, "emb_b_train": args.emb_b_train,
+        "objective": args.objective, "uot_rho": args.uot_rho,
         "init": args.init, "perturb_angle": args.perturb_angle, "seed": args.seed,
         "n_train": n, "bs": args.bs, "accum": args.accum, "steps": args.steps, "lr": args.lr,
         "sigma_start": args.sigma_start, "sigma_end": args.sigma_end,
